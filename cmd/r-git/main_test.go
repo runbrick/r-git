@@ -1,25 +1,23 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/vivaui/viva/app"
+	"github.com/vivaui/viva/ui"
 )
 
 func TestPageShowsEmptyState(t *testing.T) {
 	m := &model{}
-	driver, err := app.NewDriver(app.Config{
-		Title: "r-git",
-		Paint: m.page,
-	}, nil)
+	page := ui.NewPage(ui.PageConfig{View: m.page})
+	driver, err := app.NewDriver(page.Config(app.Config{Title: "r-git", Width: 480, Height: 240}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer driver.Close()
 
-	for _, label := range driver.Snapshot().Labels {
-		if strings.Contains(label.Value, "Open a repository") {
+	for _, hit := range driver.Snapshot().Hits {
+		if hit.Label == "Open a repository" {
 			return
 		}
 	}

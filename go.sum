@@ -2,5 +2,5 @@ github.com/ebitengine/purego v0.11.1 h1:2zpWRSQNVKN4eKsKO9eM1ILDgWfYMY9GwqRmK6Xe
 github.com/ebitengine/purego v0.11.1/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
 github.com/pelletier/go-toml/v2 v2.4.3 h1:GTRvJQutkOSftxIFD5xw9aepkYNuPWmVJpffdDPYVpY=
 github.com/pelletier/go-toml/v2 v2.4.3/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
-github.com/vivaui/viva v0.5.1 h1:c6xHo0yKsMDEYfVt9t70dpSDoK7dXqF3DtfD2sVcuSI=
-github.com/vivaui/viva v0.5.1/go.mod h1:iXOoCNuLlzKuz3cLna2y5bgXAFY8eLJSld6narLbpk4=
+github.com/vivaui/viva v0.5.2-0.20261109155928-8b39edf779f6 h1:TPUAp0Vp5E2i7EjYAht8qan5jitE8YX9WDfQ72KhSjw=
+github.com/vivaui/viva v0.5.2-0.20261109155928-8b39edf779f6/go.mod h1:iXOoCNuLlzKuz3cLna2y5bgXAFY8eLJSld6narLbpk4=

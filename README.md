@@ -2,6 +2,7 @@
 
 A Go port of [Rebased](https://github.com/DetachHead/rebased), a git client based on the IntelliJ platform.
 The UI uses the [Viva](https://github.com/vivaui/viva) desktop framework.
+Viva is pinned to `v0.5.2-0.20261109155928-8b39edf779f6` because the page API used by this application is not available in a tagged release yet.
 
 Work in progress. The port is split into small pull requests, one per module.
 
