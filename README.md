@@ -4,3 +4,35 @@ A Go port of [Rebased](https://github.com/DetachHead/rebased), a git client base
 The UI uses the [Viva](https://github.com/vivaui/viva) desktop framework.
 
 Work in progress. The port is split into small pull requests, one per module.
+
+## Build
+
+Build the application with:
+
+```sh
+go build ./cmd/r-git
+```
+
+The desktop UI uses Viva. Linux builds require XCB and Vulkan system libraries; CI installs their development packages on Ubuntu.
+
+## Test
+
+Run the local checks with:
+
+```sh
+sh scripts/check.sh
+```
+
+The checks cover formatting, vet, build, and tests. UI tests use Viva's headless app driver and do not open a window. Git tests create isolated temporary repositories and skip when Git is unavailable.
+
+## Package layout
+
+- `cmd/r-git`: application entry point and Viva UI.
+- `internal/git/model`: core Git types without I/O.
+- `internal/git/command`: Git CLI execution.
+- `internal/git/repo`: repository state readers and parsers.
+- `internal/git/ops`: branch, commit, stash, push, and rebase operations.
+- `internal/graph`: commit graph layout.
+- `internal/config`: settings and recent projects.
+- `internal/ui`: Viva screens.
+- `internal/testutil`: temporary Git repositories for tests.
