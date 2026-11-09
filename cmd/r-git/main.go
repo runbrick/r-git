@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 
+	"github.com/runbrick/r-git/internal/git/ops"
+
 	"github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/ui"
 )
@@ -16,6 +18,9 @@ func (m *model) page(c ui.C) {
 }
 
 func main() {
+	if ops.HandleAskpass() {
+		return
+	}
 	m := &model{}
 	if err := ui.Run(app.Config{Title: "r-git"}, m.page); err != nil {
 		log.Fatal(err)
