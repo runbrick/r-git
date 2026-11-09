@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const editorModeEnv = "R_GIT_EDITOR_MODE"
+
 type RebaseEntry struct{ Action, Commit, Subject string }
 
 func ParseTodo(todo []byte) ([]RebaseEntry, error) {
@@ -81,4 +83,47 @@ func HandleSequenceEditor(_ context.Context, path string, edit func([]RebaseEntr
 		}
 	}
 	return WriteTodo(path, entries)
+}
+
+// RunEditorIfRequested serves files passed to r-git as Git's sequence/message editor.
+func RunEditorIfRequested() (handled bool, exitCode int) {
+	mode := os.Getenv(editorModeEnv)
+	if mode == "" {
+		return false, 0
+	}
+	if len(os.Args) < 2 {
+		return true, 2
+	}
+	path := os.Args[len(os.Args)-1]
+	switch mode {
+	case "capture":
+		data, err := os.ReadFile(path)
+		if err == nil {
+			err = os.WriteFile(os.Getenv("R_GIT_EDITOR_OUT"), data, 0600)
+		}
+		if err != nil {
+			return true, 2
+		}
+		return true, 1
+	case "apply":
+		return true, copyEditorFile(os.Getenv("R_GIT_EDITOR_IN"), path)
+	case "message":
+		return true, copyEditorFile(os.Getenv("R_GIT_EDITOR_IN"), path)
+	default:
+		return true, 2
+	}
+}
+
+func copyEditorFile(source, destination string) int {
+	if source == "" {
+		return 2
+	}
+	data, err := os.ReadFile(source)
+	if err == nil {
+		err = os.WriteFile(destination, data, 0600)
+	}
+	if err != nil {
+		return 2
+	}
+	return 0
 }

@@ -4,11 +4,19 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/runbrick/r-git/internal/git/command"
 	"github.com/runbrick/r-git/internal/testutil"
 )
+
+func TestMain(m *testing.M) {
+	if handled, exitCode := RunEditorIfRequested(); handled {
+		os.Exit(exitCode)
+	}
+	os.Exit(m.Run())
+}
 
 func testOps(t *testing.T) (*testutil.Repo, Operations) {
 	t.Helper()
@@ -122,4 +130,94 @@ func TestHandleSequenceEditor(t *testing.T) {
 	if err != nil || string(data) != "drop abc one\npick def two\n" {
 		t.Fatalf("got %q, err %v", data, err)
 	}
+}
+
+func TestInteractiveRebaseSquash(t *testing.T) {
+	repo, ops := interactiveRepo(t)
+	result := ops.InteractiveRebase(context.Background(), "HEAD~2", func(entries []RebaseEntry) ([]RebaseEntry, error) {
+		entries[1].Action = "squash"
+		return entries, nil
+	})
+	if result.Outcome != OutcomeDone {
+		t.Fatalf("interactive rebase: %#v", result)
+	}
+	if got := strings.TrimSpace(repo.Git("rev-list", "--count", "HEAD")); got != "2" {
+		t.Fatalf("commit count = %s, want 2 including base", got)
+	}
+}
+
+func TestInteractiveRebaseDrop(t *testing.T) {
+	repo, ops := interactiveRepo(t)
+	result := ops.InteractiveRebase(context.Background(), "HEAD~2", func(entries []RebaseEntry) ([]RebaseEntry, error) {
+		entries[0].Action = "drop"
+		return entries, nil
+	})
+	if result.Outcome != OutcomeDone {
+		t.Fatalf("interactive rebase: %#v", result)
+	}
+	if got := strings.TrimSpace(repo.Git("rev-list", "--count", "HEAD")); got != "2" {
+		t.Fatalf("commit count = %s, want 2 including base", got)
+	}
+	if _, err := os.Stat(repo.Dir + "/first.txt"); !os.IsNotExist(err) {
+		t.Fatalf("dropped file still exists or stat failed: %v", err)
+	}
+}
+
+func TestInteractiveRebaseReorder(t *testing.T) {
+	repo, ops := interactiveRepo(t)
+	result := ops.InteractiveRebase(context.Background(), "HEAD~2", func(entries []RebaseEntry) ([]RebaseEntry, error) {
+		entries[0], entries[1] = entries[1], entries[0]
+		return entries, nil
+	})
+	if result.Outcome != OutcomeDone {
+		t.Fatalf("interactive rebase: %#v", result)
+	}
+	if got := strings.Split(strings.TrimSpace(repo.Git("log", "-2", "--format=%s")), "\n"); len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("reordered log = %#v", got)
+	}
+}
+
+func TestInteractiveRebaseReword(t *testing.T) {
+	repo, ops := interactiveRepo(t)
+	result := ops.InteractiveRebase(context.Background(), "HEAD~2", func(entries []RebaseEntry) ([]RebaseEntry, error) {
+		entries[0].Action = "reword"
+		entries[0].Subject = "renamed first"
+		return entries, nil
+	})
+	if result.Outcome != OutcomeDone {
+		t.Fatalf("interactive rebase: %#v", result)
+	}
+	if got := repo.Git("log", "-2", "--format=%s"); !strings.Contains(got, "renamed first") {
+		t.Fatalf("reworded log = %q", got)
+	}
+}
+
+func TestInteractiveRebaseFixupFirstDoesNotChangeRepo(t *testing.T) {
+	repo, ops := interactiveRepo(t)
+	head := strings.TrimSpace(repo.Git("rev-parse", "HEAD"))
+	result := ops.InteractiveRebase(context.Background(), "HEAD~2", func(entries []RebaseEntry) ([]RebaseEntry, error) {
+		entries[0].Action = "fixup"
+		return entries, nil
+	})
+	if result.Outcome != OutcomeError || !errors.Is(result.Err, ErrInvalidTodo) {
+		t.Fatalf("interactive rebase = %#v, want invalid todo", result)
+	}
+	if got := strings.TrimSpace(repo.Git("rev-parse", "HEAD")); got != head {
+		t.Fatalf("HEAD changed from %s to %s", head, got)
+	}
+	if got := strings.TrimSpace(repo.Git("status", "--porcelain")); got != "" {
+		t.Fatalf("worktree changed: %q", got)
+	}
+}
+
+func interactiveRepo(t *testing.T) (*testutil.Repo, Operations) {
+	t.Helper()
+	repo, ops := testOps(t)
+	repo.WriteFile("base.txt", "base\n")
+	repo.Commit("base")
+	repo.WriteFile("first.txt", "first\n")
+	repo.Commit("first")
+	repo.WriteFile("second.txt", "second\n")
+	repo.Commit("second")
+	return repo, ops
 }

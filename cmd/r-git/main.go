@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"github.com/runbrick/r-git/internal/git/ops"
 	"github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/ui"
 )
@@ -16,6 +17,12 @@ func (m *model) page(c ui.C) {
 }
 
 func main() {
+	if handled, exitCode := ops.RunEditorIfRequested(); handled {
+		if exitCode != 0 {
+			log.Fatalf("git editor failed with exit code %d", exitCode)
+		}
+		return
+	}
 	m := &model{}
 	if err := ui.Run(app.Config{Title: "r-git"}, m.page); err != nil {
 		log.Fatal(err)
