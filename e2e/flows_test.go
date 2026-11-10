@@ -104,6 +104,10 @@ func TestCreateBranchCommitAndPush(t *testing.T) {
 	if tip != remoteTip {
 		t.Fatalf("remote topic = %s, local = %s", remoteTip, tip)
 	}
+	upstream := strings.TrimSpace(f.git(t, "rev-parse", "--abbrev-ref", "topic@{upstream}"))
+	if upstream != "origin/topic" {
+		t.Fatalf("topic upstream = %q", upstream)
+	}
 }
 
 func TestPullRebaseShowsLinearHistory(t *testing.T) {
@@ -166,7 +170,9 @@ func TestMergeConflictResolveAndCommit(t *testing.T) {
 	a.clickToolbar("Conflicts")
 	a.waitFor("Close conflicts")
 	a.clickWhenEnabled("conflict.txt")
+	a.waitFor("ours first")
 	a.clickWhenEnabled("Accept Theirs")
+	a.waitFor("theirs first")
 	a.clickWhenEnabled("Mark resolved")
 	a.waitFor("Select a conflicted file")
 	a.click("Close conflicts")

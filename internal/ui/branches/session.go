@@ -320,7 +320,8 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 			continue
 		}
 		refspec := target.Branch + ":" + target.Target
-		results, err := pusher.Push(ctx, s.repo.Path, target.Remote, refspec, force)
+		remoteName, _ := s.upstream(target.Branch)
+		results, err := pusher.Push(ctx, s.repo.Path, target.Remote, refspec, force, remoteName == "")
 		if err != nil && len(results) == 0 {
 			s.emit(UIEvent{Error: err.Error()})
 			return
@@ -328,7 +329,7 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 		all = append(all, results...)
 	}
 	if tags {
-		results, err := pusher.Push(ctx, s.repo.Path, s.defaultRemote(), "--tags", false)
+		results, err := pusher.Push(ctx, s.repo.Path, s.defaultRemote(), "--tags", false, false)
 		if err != nil && len(results) == 0 {
 			s.emit(UIEvent{Error: err.Error()})
 		}

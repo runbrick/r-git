@@ -11,19 +11,24 @@ import (
 )
 
 type View struct {
-	Conflicts   []ops.Conflict
-	Path        string
-	Content     ops.ConflictContent
-	Merge       *textdiff.Merge
-	Result      string
-	Busy        bool
-	Error       string
-	OnSelect    func(ops.Conflict)
-	OnResolve   func(string, []byte)
-	OnClose     func()
+	Conflicts []ops.Conflict
+	Path      string
+	Content   ops.ConflictContent
+	Merge     *textdiff.Merge
+	Result    string
+	Busy      bool
+	Error     string
+	OnSelect  func(ops.Conflict)
+	OnResolve func(string, []byte)
+	OnClose   func()
+	// OnEdit returns the workflow request current when the user edits the result.
+	OnEdit      func() uint64
 	left, right diffview.View
 	manual      bool
 	resultField ui.Field
+	// Edit is the workflow request current when the user last changed the
+	// result. A file load requested earlier must not replace that result.
+	Edit uint64
 }
 
 func (v *View) SetFile(path string, content ops.ConflictContent) {
@@ -38,6 +43,13 @@ func (v *View) SetFile(path string, content ops.ConflictContent) {
 	v.right.Unified = true
 	v.left.SetContent(content.LeftLabel, content.Left, content.Left)
 	v.right.SetContent(content.RightLabel, content.Right, content.Right)
+}
+
+func (v *View) noteEdit() {
+	v.manual = true
+	if v.OnEdit != nil {
+		v.Edit = v.OnEdit()
+	}
 }
 
 func (v *View) choose(index int, side textdiff.Side) {
@@ -118,17 +130,18 @@ func (v *View) Page(c ui.C) {
 					if ui.Button(c, "Accept Yours").Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Left
 						v.resultField.SetText(v.Result)
-						v.manual = true
+						v.noteEdit()
 					}
 					if ui.Button(c, "Accept Theirs").Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Right
 						v.resultField.SetText(v.Result)
-						v.manual = true
+						v.noteEdit()
 					}
 					if ui.Button(c, "Apply non-conflicting changes").Disabled(v.Busy || v.manual).Clicked() {
 						v.Merge.ApplyNonConflicting()
 						v.Result = v.Merge.Result()
 						v.resultField.SetText(v.Result)
+						v.noteEdit()
 					}
 					if v.manual {
 						ui.Text(c, "Result edited manually").Muted()

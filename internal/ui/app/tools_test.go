@@ -139,6 +139,34 @@ func TestDriverResolveMixedConflictChunks(t *testing.T) {
 	}
 }
 
+// A file load requested before Accept Theirs must not replace the result when
+// the click's pump applies that load.
+func TestStaleConflictLoadDoesNotReplaceAcceptedResult(t *testing.T) {
+	m := &Model{}
+	m.initTools()
+	m.tools.merge.SetFile("conflict.txt", ops.ConflictContent{
+		Left: "ours\n", Right: "theirs\n", Base: "base\n",
+	})
+	m.tools.request = 3
+	m.tools.merge.Result = "theirs\n"
+	m.tools.merge.Edit = 4
+	m.applyWorkflow(&workflowResult{
+		kind: workflowFile, request: 3, path: "conflict.txt",
+		content: ops.ConflictContent{Left: "ours\n", Right: "theirs\n", Base: "base\n"},
+	})
+	if m.tools.merge.Result != "theirs\n" {
+		t.Fatalf("stale load replaced result %q", m.tools.merge.Result)
+	}
+	m.tools.request = 5
+	m.applyWorkflow(&workflowResult{
+		kind: workflowFile, request: 5, path: "conflict.txt",
+		content: ops.ConflictContent{Left: "fresh ours\n", Right: "fresh theirs\n", Base: "base\n"},
+	})
+	if !strings.Contains(m.tools.merge.Content.Right, "fresh") || m.tools.merge.Edit != 0 {
+		t.Fatalf("newer load did not apply: result %q right %q edit %d", m.tools.merge.Result, m.tools.merge.Content.Right, m.tools.merge.Edit)
+	}
+}
+
 func TestDriverInteractiveRebaseSquash(t *testing.T) {
 	g := testutil.NewRepo(t)
 	g.WriteFile("base.txt", "base\n")

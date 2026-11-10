@@ -60,6 +60,7 @@ func (m *Model) initTools() {
 	m.tools.diff.OnClose = func() { m.tools.screen = "" }
 	m.tools.merge.OnClose = func() { m.tools.screen = "" }
 	m.tools.merge.OnSelect = m.openConflict
+	m.tools.merge.OnEdit = func() uint64 { return m.tools.request }
 	m.tools.merge.OnResolve = m.resolveConflict
 	m.tools.rebase.Upstream = "HEAD~2"
 	m.tools.rebase.OnLoad = m.prepareRebase
@@ -322,6 +323,13 @@ func (m *Model) applyWorkflow(out *workflowResult) {
 			m.tools.merge.SetFile(first.Path, content)
 		}
 	case workflowFile:
+		// Pump applies a queued load before the click that follows a tree
+		// read. A load requested before the user edited the result must not
+		// replace that edit.
+		if out.request <= m.tools.merge.Edit && m.tools.merge.Path == out.path {
+			break
+		}
+		m.tools.merge.Edit = 0
 		m.tools.merge.SetFile(out.path, out.content)
 		m.tools.screen = "merge"
 	case workflowTodo:

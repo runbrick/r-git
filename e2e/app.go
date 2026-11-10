@@ -518,9 +518,6 @@ func (a *app) clickWhenEnabled(label string) {
 
 func (a *app) windowSize() (float64, float64) {
 	a.t.Helper()
-	if a.width > 0 && a.height > 0 {
-		return a.width, a.height
-	}
 	if _, err := a.roundTrip("size"); err != nil {
 		a.t.Fatal(err)
 	}
