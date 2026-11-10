@@ -62,7 +62,7 @@ type Model struct {
 
 	invalidator viva.Invalidator
 	mu          sync.Mutex
-	pending     *loadResult
+	pending     []*loadResult
 	ctx         context.Context
 	cancel      context.CancelFunc
 	workers     sync.WaitGroup
@@ -206,13 +206,13 @@ func (m *Model) startOpen(path string) {
 			out.repo, err = repo.OpenWithExecutor(ctx, path, runner)
 		}
 		if err == nil {
-			out.ordered, err = out.repo.ParentsOrdered(ctx, "HEAD")
+			out.ordered, err = out.repo.ParentsOrderedAll(ctx)
 		}
 		if err == nil {
 			out.graph, out.graphIndex, err = logview.NewGraphRows(out.ordered)
 		}
 		if err == nil {
-			out.commits, err = out.repo.Log(ctx, repo.LogQuery{MaxCount: pageSize})
+			out.commits, err = out.repo.Log(ctx, repo.LogQuery{MaxCount: pageSize, All: true})
 		}
 		if err == nil {
 			out.done = len(out.commits) < pageSize
@@ -235,7 +235,7 @@ func (m *Model) loadPage(branch string, skip int) {
 	m.workers.Add(1)
 	go func() {
 		defer m.workers.Done()
-		query := repo.LogQuery{MaxCount: pageSize, Skip: skip}
+		query := repo.LogQuery{MaxCount: pageSize, Skip: skip, All: true}
 		if branch != "" && branch != "All branches" {
 			query.Branch = branch
 		}
@@ -274,11 +274,15 @@ func (m *Model) changeBranch(branch string) {
 	m.workers.Add(1)
 	go func() {
 		defer m.workers.Done()
-		queryBranch := branch
+		query := repo.LogQuery{MaxCount: pageSize, All: true}
+		var ordered []repo.CommitParents
+		var err error
 		if branch == "All branches" {
-			queryBranch = "HEAD"
+			ordered, err = repository.ParentsOrderedAll(ctx)
+		} else {
+			query.Branch = branch
+			ordered, err = repository.ParentsOrdered(ctx, branch)
 		}
-		ordered, err := repository.ParentsOrdered(ctx, queryBranch)
 		var graphRows *logview.GraphRows
 		var graphIndex map[model.Hash]int
 		if err == nil {
@@ -286,10 +290,6 @@ func (m *Model) changeBranch(branch string) {
 		}
 		var commits []model.Commit
 		if err == nil {
-			query := repo.LogQuery{MaxCount: pageSize, Branch: queryBranch}
-			if queryBranch == "HEAD" {
-				query.Branch = ""
-			}
 			commits, err = repository.Log(ctx, query)
 		}
 		m.publish(&loadResult{kind: resultOpen, generation: generation, path: repository.Path, branch: branch, repo: repository, ordered: ordered, graph: graphRows, graphIndex: graphIndex, commits: commits, done: len(commits) < pageSize, err: err})
@@ -300,7 +300,7 @@ func (m *Model) publish(result *loadResult) {
 	m.mu.Lock()
 	accepted := !m.closed && result.generation == m.generation
 	if accepted {
-		m.pending = result
+		m.pending = append(m.pending, result)
 	}
 	m.mu.Unlock()
 	if accepted {
@@ -311,9 +311,15 @@ func (m *Model) publish(result *loadResult) {
 // applyPending runs only on Viva's window thread, before the repaint it wakes.
 func (m *Model) applyPending() {
 	m.mu.Lock()
-	result := m.pending
+	results := m.pending
 	m.pending = nil
 	m.mu.Unlock()
+	for _, result := range results {
+		m.applyResult(result)
+	}
+}
+
+func (m *Model) applyResult(result *loadResult) {
 	if result == nil || result.generation != m.generation {
 		return
 	}
@@ -345,8 +351,8 @@ func (m *Model) applyPending() {
 			m.log.Branch = result.branch
 		}
 		m.log.SetRefs(result.repo.HEAD, result.repo.Branches, result.repo.Tags)
+		m.log.ResetBranch(m.log.Branch)
 		m.log.SetGraph(result.graph, result.graphIndex)
-		m.log.Commits, m.log.Done, m.log.Loading = nil, false, false
 		m.log.AppendPage(result.commits, result.done)
 		if len(result.commits) > 0 {
 			m.log.Select(result.commits[0].Hash)

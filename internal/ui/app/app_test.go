@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/testutil"
 	viva "github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/gfx"
@@ -63,6 +65,136 @@ func TestDriverShowsOpenError(t *testing.T) {
 	if !hasLabel(driver, "not a git repository") {
 		t.Fatalf("error label missing: %v", labelValues(driver))
 	}
+}
+
+func TestDriverTextFilterBranchFilterAndSelectionDetails(t *testing.T) {
+	g := testutil.NewRepo(t)
+	g.WriteFile("base.txt", "base\n")
+	g.Commit("shared history")
+	mainBranch := strings.TrimSpace(g.Git("branch", "--show-current"))
+	g.Git("checkout", "-q", "-b", "topic")
+	g.WriteFile("topic.txt", "topic\n")
+	topicHash := g.Commit("topic exclusive")
+	g.Git("checkout", "-q", mainBranch)
+	g.WriteFile("main.txt", "main\n")
+	g.Commit("main exclusive")
+
+	for _, appearance := range []viva.Appearance{viva.AppearanceLight, viva.AppearanceDark} {
+		t.Run(appearance.String(), func(t *testing.T) {
+			viva.SetNativeAppearance(appearance)
+			m, driver := openDriver(t, g.Dir)
+			waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading && len(m.log.Details) > 0 })
+			if len(m.log.Commits) != 3 {
+				t.Fatalf("all branches loaded %d commits, want 3", len(m.log.Commits))
+			}
+			clickControl(t, driver, "Filter")
+			if err := driver.Type("topic exclusive"); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, driver, func() bool { return m.log.VisibleCount() == 1 })
+			visible, ok := m.log.VisibleCommit(0)
+			if !ok || visible.Hash.String() != topicHash {
+				t.Fatalf("text filter returned %+v", visible)
+			}
+			clickControl(t, driver, "topic exclusive")
+			m.workers.Wait()
+			if err := driver.Pump(); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, driver, func() bool { return m.log.Selected().String() == topicHash && hasLabel(driver, "added  topic.txt") })
+			if hasLabel(driver, "added  main.txt") {
+				t.Fatal("details still show previous commit's changed files")
+			}
+			clickControl(t, driver, "Filter")
+			if _, err := driver.ShortcutChord(gfx.ModifierControl, 'a'); err != nil {
+				t.Fatal(err)
+			}
+			if err := driver.Key(gfx.KeyBackspace, 0); err != nil {
+				t.Fatal(err)
+			}
+			clickControl(t, driver, "Branch")
+			clickControl(t, driver, "topic")
+			waitFor(t, driver, func() bool { return m.log.Branch == "topic" && !m.log.Loading })
+			if len(m.log.Commits) != 2 || m.log.VisibleCount() != 2 {
+				t.Fatalf("branch has metadata=%d visible=%d, want 2", len(m.log.Commits), m.log.VisibleCount())
+			}
+			for _, commit := range m.log.Commits {
+				if commit.Subject == "main exclusive" {
+					t.Fatal("branch filter included another branch's commit")
+				}
+			}
+			if !hasLabel(driver, "topic exclusive") || hasLogLabel(driver, "main exclusive") {
+				t.Fatal("branch row labels do not match selected branch")
+			}
+			clickControl(t, driver, "Branch")
+			clickControl(t, driver, "All branches")
+			waitFor(t, driver, func() bool { return m.log.Branch == "All branches" && !m.log.Loading })
+			if len(m.log.Commits) != 3 || !hasLogLabel(driver, "main exclusive") {
+				t.Fatal("All branches did not restore the other branch's history")
+			}
+		})
+	}
+}
+
+func TestDriverAppliesPageAndDetailsPublishedBeforeOneWake(t *testing.T) {
+	g := testutil.NewRepo(t)
+	g.WriteFile("base.txt", "base\n")
+	g.Commit("base")
+	m, driver := openDriver(t, g.Dir)
+	waitFor(t, driver, func() bool { return m.repo != nil && len(m.log.Details) > 0 })
+	m.workers.Wait()
+	if err := driver.Pump(); err != nil {
+		t.Fatal(err)
+	}
+	selected := m.log.Selected()
+	newCommit := model.Commit{Hash: model.MustParseHash(strings.Repeat("a", 40)), Subject: "queued page"}
+	m.log.Loading = true
+	var publishers sync.WaitGroup
+	publishers.Add(2)
+	go func() {
+		defer publishers.Done()
+		m.publish(&loadResult{kind: resultPage, generation: m.generation, commits: []model.Commit{newCommit}, done: true})
+	}()
+	go func() {
+		defer publishers.Done()
+		m.publish(&loadResult{kind: resultDetails, generation: m.generation, hash: selected, details: []model.FileChange{{Status: model.StatusAdded, Path: "queued-details.txt"}}})
+	}()
+	publishers.Wait()
+	if err := driver.Pump(); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.log.Commits) != 2 || m.log.Loading {
+		t.Fatalf("page result not applied: commits=%d loading=%v", len(m.log.Commits), m.log.Loading)
+	}
+	if !hasLabel(driver, "queued-details.txt") {
+		t.Fatal("details result was lost before the wake")
+	}
+}
+
+func clickControl(t *testing.T, driver *viva.Driver, label string) {
+	t.Helper()
+	for _, hit := range driver.Snapshot().Hits {
+		if hit.Label == label {
+			if err := driver.Click(hit.Bounds.X+hit.Bounds.Width/2, hit.Bounds.Y+hit.Bounds.Height/2); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	var labels []string
+	for _, hit := range driver.Snapshot().Hits {
+		labels = append(labels, hit.Label)
+	}
+	t.Fatalf("no control %q among %v", label, labels)
+}
+
+func hasLogLabel(driver *viva.Driver, value string) bool {
+	for _, label := range driver.Snapshot().Labels {
+		if label.Value == value && label.Bounds.X < 800 {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDriverScrollLoadsNextPageWithoutRebuildingGraph(t *testing.T) {

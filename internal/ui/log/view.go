@@ -156,7 +156,7 @@ func (v *View) Page(c ui.C) {
 			oldFilter, oldBranch := v.Filter, v.Branch
 			search := ui.TextField(c, &v.Filter, "Filter", "Subject or hash")
 			search.Grow(1)
-			ui.Select(c, &v.Branch, v.Choices, nil)
+			ui.Select(c, &v.Branch, v.Choices, nil).Label("Branch")
 			if oldFilter != v.Filter {
 				v.rebuildVisible()
 			}
@@ -168,6 +168,9 @@ func (v *View) Page(c ui.C) {
 		ui.Row(c).Fill().Children(func() {
 			ui.Column(c).Grow(1).Fill().Children(func() {
 				v.list.RowWidth = 900
+				if v.list.Label == nil {
+					v.list.Label = v.rowLabel
+				}
 				ui.Row(c).FillWidth().PadX(12).PadY(6).Gap(12).Background(theme.Card).Children(func() {
 					ui.Text(c, "Graph").Width(44).FontSize(11).Muted()
 					ui.Text(c, "Subject").Grow(1).FontSize(11).Muted()
@@ -204,8 +207,7 @@ func (v *View) Page(c ui.C) {
 					if !hash.Equal(v.selected) {
 						v.selected = hash
 						if v.OnSelect != nil {
-							h := hash
-							c.After(func() { v.OnSelect(h) })
+							v.OnSelect(hash)
 						}
 					}
 				}
@@ -229,6 +231,13 @@ func (v *View) Page(c ui.C) {
 			v.detailPane(c)
 		})
 	})
+}
+
+func (v *View) rowLabel(row int) string {
+	if row < 0 || row >= len(v.visible) {
+		return ""
+	}
+	return v.Commits[v.visible[row]].Subject
 }
 
 func (v *View) detailPane(c ui.C) {
