@@ -206,6 +206,142 @@ func TestCredentialsDialogBlocksProvider(t *testing.T) {
 	}
 }
 
+func TestCredentialsQueueAnswersInOrder(t *testing.T) {
+	m, driver := openDriver(t, "")
+	m.branches.Credentials.SetInvalidator(&m.invalidator)
+	type result struct {
+		cred ops.Credential
+		err  error
+	}
+	first := make(chan result, 1)
+	second := make(chan result, 1)
+	go func() {
+		cred, err := m.branches.Credentials.Credentials(context.Background(), ops.CredentialRequest{
+			Prompt: "Username for 'https://one.example'",
+			URL:    "https://one.example",
+			Kind:   ops.CredentialKindUsername,
+		})
+		first <- result{cred, err}
+	}()
+	waitFor(t, driver, func() bool { return hasLabel(driver, "https://one.example") })
+	go func() {
+		cred, err := m.branches.Credentials.Credentials(context.Background(), ops.CredentialRequest{
+			Prompt: "Username for 'https://two.example'",
+			URL:    "https://two.example",
+			Kind:   ops.CredentialKindUsername,
+		})
+		second <- result{cred, err}
+	}()
+	waitFor(t, driver, func() bool { return m.branches.Credentials.PendingCount() == 2 })
+	clickControl(t, driver, "Username")
+	if err := driver.Type("one"); err != nil {
+		t.Fatal(err)
+	}
+	clickControl(t, driver, "Password")
+	if err := driver.Type("secret-one"); err != nil {
+		t.Fatal(err)
+	}
+	clickControl(t, driver, "OK")
+	select {
+	case got := <-first:
+		if got.err != nil || got.cred.Username != "one" || got.cred.Password != "secret-one" {
+			t.Fatalf("first = %+v", got)
+		}
+	case <-second:
+		t.Fatal("second prompt was answered before the first")
+	}
+	waitFor(t, driver, func() bool { return hasLabel(driver, "https://two.example") })
+	if m.branches.Credentials.Password() != "" {
+		t.Fatal("password was still filled when the second prompt opened")
+	}
+	if m.branches.Credentials.Username() != "" {
+		t.Fatal("username from a different URL was still filled")
+	}
+	clickControl(t, driver, "Username")
+	if err := driver.Type("two"); err != nil {
+		t.Fatal(err)
+	}
+	clickControl(t, driver, "Password")
+	if err := driver.Type("secret-two"); err != nil {
+		t.Fatal(err)
+	}
+	clickControl(t, driver, "OK")
+	select {
+	case got := <-second:
+		if got.err != nil || got.cred.Username != "two" || got.cred.Password != "secret-two" {
+			t.Fatalf("second = %+v", got)
+		}
+	default:
+		t.Fatal("second prompt was not answered")
+	}
+}
+
+func TestCredentialsCancelClosesAndShowsNext(t *testing.T) {
+	m, driver := openDriver(t, "")
+	m.branches.Credentials.SetInvalidator(&m.invalidator)
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	second := make(chan ops.Credential, 1)
+	go func() {
+		_, err := m.branches.Credentials.Credentials(ctx, ops.CredentialRequest{
+			Prompt: "Username for 'https://gone.example'",
+			URL:    "https://gone.example",
+			Kind:   ops.CredentialKindUsername,
+		})
+		first <- err
+	}()
+	waitFor(t, driver, func() bool { return hasLabel(driver, "https://gone.example") })
+	go func() {
+		cred, err := m.branches.Credentials.Credentials(context.Background(), ops.CredentialRequest{
+			Prompt: "Username for 'https://next.example'",
+			URL:    "https://next.example",
+			Kind:   ops.CredentialKindUsername,
+		})
+		if err != nil {
+			t.Errorf("second prompt: %v", err)
+			return
+		}
+		second <- cred
+	}()
+	waitFor(t, driver, func() bool { return m.branches.Credentials.PendingCount() == 2 })
+	clickControl(t, driver, "Password")
+	if err := driver.Type("leftover"); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	waitFor(t, driver, func() bool {
+		return hasLabel(driver, "https://next.example") && !hasLabel(driver, "https://gone.example")
+	})
+	if m.branches.Credentials.Password() != "" {
+		t.Fatal("cancelled prompt left its password in the next dialog")
+	}
+	select {
+	case err := <-first:
+		if err == nil {
+			t.Fatal("cancelled prompt returned a credential")
+		}
+	default:
+		t.Fatal("cancelled prompt is still blocked")
+	}
+	clickControl(t, driver, "Username")
+	if err := driver.Type("next"); err != nil {
+		t.Fatal(err)
+	}
+	clickControl(t, driver, "Password")
+	if err := driver.Type("fresh"); err != nil {
+		t.Fatal(err)
+	}
+	clickControl(t, driver, "OK")
+	select {
+	case cred := <-second:
+		if cred.Username != "next" || cred.Password != "fresh" {
+			t.Fatalf("next = %+v", cred)
+		}
+	default:
+		t.Fatal("next prompt was not answered")
+	}
+}
+
 func chooseBranch(t *testing.T, driver *viva.Driver, label string) {
 	t.Helper()
 	clickLeftmost(t, driver, label)
