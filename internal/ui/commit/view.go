@@ -118,6 +118,15 @@ func (v *View) SetChanges(entries []repo.ChangeEntry) {
 	v.rebuild()
 }
 
+// SetIncluded marks whether a path in a group is part of the next commit.
+func (v *View) SetIncluded(group repo.ChangeGroup, path string, on bool) {
+	if v.included == nil {
+		v.included = map[string]bool{}
+	}
+	v.included[includeKey(group, path)] = on
+	v.rebuild()
+}
+
 // SetLastMessage records HEAD's message so Amend can prefill it.
 func (v *View) SetLastMessage(message string) {
 	v.lastMessage = strings.TrimRight(message, "\n")

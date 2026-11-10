@@ -45,6 +45,7 @@ type loadResult struct {
 	message    string
 	toast      string
 	committed  bool
+	pushAfter  bool
 }
 
 // Model owns the application shell and coordinates repository work.
@@ -353,6 +354,10 @@ func (m *Model) applyResult(result *loadResult) {
 	if result == nil || result.generation != m.generation {
 		return
 	}
+	if result.kind == resultCommit {
+		m.applyCommit(result)
+		return
+	}
 	if result.err != nil {
 		if result.kind == resultOpen && m.repo == nil {
 			m.log.Loading = false
@@ -398,24 +403,29 @@ func (m *Model) applyResult(result *loadResult) {
 		if result.hash.Equal(m.log.Selected()) {
 			m.log.Details = result.details
 		}
-	case resultCommit:
-		m.commit.Busy = false
-		m.commit.SetChanges(result.changes)
-		if result.message != "" {
-			m.commit.SetLastMessage(result.message)
+	}
+}
+
+func (m *Model) applyCommit(result *loadResult) {
+	m.commit.Busy = false
+	m.commit.SetChanges(result.changes)
+	if result.message != "" {
+		m.commit.SetLastMessage(result.message)
+	}
+	if result.err != nil {
+		m.commit.Error = commitview.UserMessage(result.err)
+		m.commit.ShowToast("Commit failed", m.commit.Error, ui.ToastError)
+		return
+	}
+	if result.committed {
+		m.commit.ClearMessage()
+		m.commit.ShowToast("Committed", result.toast, ui.ToastSuccess)
+		if result.pushAfter && m.OnPush != nil {
+			m.OnPush()
 		}
-		if result.err != nil {
-			m.commit.Error = commitview.UserMessage(result.err)
-			m.commit.ShowToast("Commit failed", m.commit.Error, ui.ToastError)
-			return
-		}
-		if result.committed {
-			m.commit.ClearMessage()
-			m.commit.ShowToast("Committed", result.toast, ui.ToastSuccess)
-			m.refreshLog()
-		} else if result.toast != "" {
-			m.commit.ShowToast("Changes", result.toast, ui.ToastSuccess)
-		}
+		m.refreshLog()
+	} else if result.toast != "" {
+		m.commit.ShowToast("Changes", result.toast, ui.ToastSuccess)
 	}
 }
 

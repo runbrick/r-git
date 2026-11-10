@@ -41,35 +41,36 @@ func (m *Model) handleCommitRequest(req commitview.Request) {
 			out.err = index.Discard(ctx, req.Paths)
 			out.toast = "Discarded"
 		case commitview.RequestCommit:
-			// Stage the checked paths, then unstage the rest, so an
-			// unversioned file can be committed and an unchecked staged
-			// file stays out. git commit --only refuses an untracked path.
-			if err := index.Stage(ctx, req.Paths); err != nil {
-				out.err = err
-				break
-			}
+			// Partial commit, matching git4idea: stage only checked paths
+			// that are still untracked (git commit --only refuses those),
+			// then commit --only the checked paths. Staged content the
+			// user left unchecked, including a partial hunk, stays in the
+			// index. When the checked paths are exactly the staged set,
+			// a plain commit records the index as it is.
 			status, statusErr := repository.Status(ctx)
 			if statusErr != nil {
 				out.err = statusErr
 				break
 			}
-			if err := index.Unstage(ctx, excluded(req.Paths, changePaths(status.Changes))); err != nil {
+			if err := index.Stage(ctx, untrackedAmong(req.Paths, status.Changes)); err != nil {
 				out.err = err
 				break
 			}
-			hash, err := service.Commit(ctx, ops.CommitOptions{
+			opts := ops.CommitOptions{
 				Message: []byte(req.Message),
 				Amend:   req.Amend,
 				SignOff: req.SignOff,
 				Author:  req.Author,
-			})
+			}
+			if !sameSet(req.Paths, stagedPaths(status.Changes)) {
+				opts.Paths = append([]string{}, req.Paths...)
+			}
+			hash, err := service.Commit(ctx, opts)
 			out.err = err
 			if err == nil {
 				out.committed = true
 				out.toast = hash.Short()
-				if req.Push && m.OnPush != nil {
-					m.OnPush()
-				}
+				out.pushAfter = req.Push
 			}
 		}
 		m.fillChanges(ctx, repository, &out)
@@ -111,29 +112,56 @@ func (m *Model) fillChanges(ctx context.Context, repository *repo.Repo, out *loa
 	}
 }
 
-func excluded(included, all []string) []string {
-	want := map[string]bool{}
-	for _, path := range included {
-		want[path] = true
+func untrackedAmong(paths []string, changes []model.FileChange) []string {
+	untracked := map[string]bool{}
+	for _, change := range changes {
+		if change.Status == model.StatusUntracked || change.Worktree == '?' {
+			untracked[change.Path] = true
+		}
 	}
 	var out []string
-	for _, path := range all {
-		if !want[path] {
+	for _, path := range paths {
+		if untracked[path] {
 			out = append(out, path)
 		}
 	}
 	return out
 }
 
-func changePaths(changes []model.FileChange) []string {
+func stagedPaths(changes []model.FileChange) []string {
 	var paths []string
 	seen := map[string]bool{}
 	for _, change := range changes {
-		if change.Status == model.StatusIgnored || seen[change.Path] {
+		if change.Index == 0 || change.Index == '.' || change.Index == ' ' || change.Index == '?' || change.Index == '!' {
+			continue
+		}
+		if seen[change.Path] {
 			continue
 		}
 		seen[change.Path] = true
 		paths = append(paths, change.Path)
 	}
 	return paths
+}
+
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, path := range a {
+		seen[path]++
+	}
+	for _, path := range b {
+		seen[path]--
+		if seen[path] < 0 {
+			return false
+		}
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }
