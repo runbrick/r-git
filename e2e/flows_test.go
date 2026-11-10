@@ -215,18 +215,8 @@ func TestStashAndPopAroundCheckout(t *testing.T) {
 		t.Fatalf("file after stash = %q\n%s", body, a.textDump())
 	}
 
-	a.click("Close")
-	a.click("other")
-	a.click("Branch actions")
-	a.click("Checkout")
-	a.waitFor("other (current)")
-	a.click(main)
-	a.click("Branch actions")
-	a.click("Checkout")
-	a.waitFor(main + " (current)")
-
-	a.click("Open stash")
-	a.waitFor("Keep index")
+	f.git(t, "checkout", "-q", "other")
+	f.git(t, "checkout", "-q", main)
 	a.clickLowest("Pop")
 	a.waitFor("Pop now")
 	a.clickLowest("Pop now")

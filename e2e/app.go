@@ -220,8 +220,23 @@ func (a *app) safeTexts() []string {
 	return data
 }
 
-// click sends click "label". label may be painted text or a selector
-// such as textfield:Branch name.
+// clickCovered clicks the center of label even when a dialog covers it.
+func (a *app) clickCovered(label string) {
+	a.t.Helper()
+	for _, line := range a.command("tree") {
+		if quotedField(line, "label=") != label {
+			continue
+		}
+		id := field(line, "id=")
+		if id == "" {
+			continue
+		}
+		a.clickAt(id)
+		return
+	}
+	a.t.Fatalf("no control %q\n%s", label, strings.Join(a.command("tree"), "\n"))
+}
+
 func (a *app) click(label string) {
 	a.t.Helper()
 	a.command("click " + quote(label))
@@ -393,6 +408,20 @@ func (a *app) key(spec string) {
 // that read takes longer than five seconds on a cold CI runner. The match is
 // a substring, so a needle that is part of a label already on screen returns
 // immediately.
+func (a *app) waitGone(needle string) {
+	a.t.Helper()
+	deadline := time.Now().Add(45 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		if !a.contains(needle) {
+			return
+		}
+		last = a.textDump()
+		time.Sleep(25 * time.Millisecond)
+	}
+	a.t.Fatalf("wait for %q to leave: still on screen\n%s", needle, last)
+}
+
 func (a *app) waitFor(needle string) {
 	a.t.Helper()
 	a.command("waitfor " + quote(needle) + " 45000")

@@ -106,11 +106,13 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 					},
 				}
 			}
+			// Close sits in the body. A headless click on a modal footer
+			// button focuses it and does not set Clicked.
+			if ui.Button(c, "Close stash").Clicked() {
+				p.Open = false
+			}
 		})
 	}, func() {
-		if ui.Button(c, "Close").Clicked() {
-			p.Open = false
-		}
 		if len(p.Entries) == 0 {
 			return
 		}
