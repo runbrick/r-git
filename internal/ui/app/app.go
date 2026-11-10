@@ -260,6 +260,10 @@ func (m *Model) startPage(c ui.C) {
 		}
 		if m.log.Loading {
 			ui.Text(c, "Loading repository...").FontSize(12).Muted()
+			// The spinner asks for the next frame. Headless WaitFor delivers that
+			// frame through OnWake, which applies a result a cross-thread
+			// Invalidate did not deliver on Linux.
+			ui.Spinner(c)
 		}
 	})
 }
