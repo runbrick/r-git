@@ -46,13 +46,13 @@ type CredentialProvider interface {
 // Threat model: Any local process can connect to the port, so it is protected by a 256-bit token
 // passed in the environment to the git process.
 type AuthManager struct {
-	provider   CredentialProvider
-	token      string
-	listener   net.Listener
-	mu         sync.Mutex
-	cache      map[string]Credential
-	done       chan struct{}
-	wg         sync.WaitGroup
+	provider CredentialProvider
+	token    string
+	listener net.Listener
+	mu       sync.Mutex
+	cache    map[string]Credential
+	done     chan struct{}
+	wg       sync.WaitGroup
 }
 
 func NewAuthManager(provider CredentialProvider) (*AuthManager, error) {
@@ -181,7 +181,7 @@ func (am *AuthManager) handleConnection(conn net.Conn) {
 	if !cached || req.URL == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		
+
 		// If context ends up canceled due to connection closed, handle that via a goroutine
 		go func() {
 			select {
@@ -190,7 +190,7 @@ func (am *AuthManager) handleConnection(conn net.Conn) {
 			case <-ctx.Done():
 			}
 		}()
-		
+
 		var err error
 		cred, err = am.provider.Credentials(ctx, req)
 		if err != nil {
@@ -234,7 +234,7 @@ func HandleAskpass() bool {
 		os.Exit(1)
 	}
 	defer conn.Close()
-	
+
 	conn.SetDeadline(time.Now().Add(3 * time.Minute))
 
 	fmt.Fprintln(conn, token)
@@ -244,12 +244,12 @@ func HandleAskpass() bool {
 	if !scanner.Scan() {
 		os.Exit(1)
 	}
-	
+
 	status := scanner.Text()
 	if status != "OK" {
 		os.Exit(1)
 	}
-	
+
 	if scanner.Scan() {
 		fmt.Println(scanner.Text())
 		os.Exit(0)

@@ -2,11 +2,11 @@ package ops_test
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
-	"os"
 
 	"github.com/runbrick/r-git/internal/git/ops"
 )
@@ -43,7 +43,7 @@ func TestAuthManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	env := os.Environ()
 	env = append(env, "R_GIT_TEST_ASKPASS=1")
 	amEnv, err := am.Env()
@@ -53,13 +53,13 @@ func TestAuthManager(t *testing.T) {
 	for k, v := range amEnv {
 		env = append(env, k+"="+v)
 	}
-	
+
 	for i, e := range env {
 		if strings.HasPrefix(e, "GIT_ASKPASS=") {
 			env[i] = "GIT_ASKPASS=" + executable
 		}
 	}
-	
+
 	cmd := exec.Command(executable, "Username for 'https://example.com':")
 	cmd.Env = env
 	out, err := cmd.Output()
@@ -86,6 +86,7 @@ func TestAuthManager(t *testing.T) {
 }
 
 type errorProvider struct{}
+
 func (e *errorProvider) Credentials(ctx context.Context, req ops.CredentialRequest) (ops.Credential, error) {
 	return ops.Credential{}, os.ErrNotExist
 }
@@ -107,7 +108,7 @@ func TestAuthManager_Failures(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer am.Close()
-	
+
 	env := os.Environ()
 	env = append(env, "R_GIT_TEST_ASKPASS=1")
 	amEnv, _ := am.Env()
@@ -122,7 +123,7 @@ func TestAuthManager_Failures(t *testing.T) {
 			env[i] = "GIT_ASKPASS=" + executable
 		}
 	}
-	
+
 	cmd := exec.Command(executable, "Username for 'https://example.com':")
 	cmd.Env = env
 	if err := cmd.Run(); err == nil {
@@ -132,7 +133,7 @@ func TestAuthManager_Failures(t *testing.T) {
 	// 2. Provider error
 	amErr, _ := ops.NewAuthManager(&errorProvider{})
 	defer amErr.Close()
-	
+
 	env2 := os.Environ()
 	env2 = append(env2, "R_GIT_TEST_ASKPASS=1")
 	amEnv2, _ := amErr.Env()
@@ -144,7 +145,7 @@ func TestAuthManager_Failures(t *testing.T) {
 			env2[i] = "GIT_ASKPASS=" + executable
 		}
 	}
-	
+
 	cmd = exec.Command(executable, "Username for 'https://example.com':")
 	cmd.Env = env2
 	if err := cmd.Run(); err == nil {
@@ -153,6 +154,7 @@ func TestAuthManager_Failures(t *testing.T) {
 }
 
 type slowProvider struct{}
+
 func (s *slowProvider) Credentials(ctx context.Context, req ops.CredentialRequest) (ops.Credential, error) {
 	<-ctx.Done()
 	return ops.Credential{}, ctx.Err()
@@ -173,7 +175,7 @@ func TestAuthManager_CloseWithInflight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	env := os.Environ()
 	env = append(env, "R_GIT_TEST_ASKPASS=1")
 	amEnv, _ := am.Env()
@@ -188,11 +190,11 @@ func TestAuthManager_CloseWithInflight(t *testing.T) {
 
 	cmd := exec.Command(executable, "Username for 'https://example.com':")
 	cmd.Env = env
-	
+
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	
+
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		cmd.Process.Kill()
