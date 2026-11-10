@@ -23,6 +23,7 @@ const (
 	resultOpen resultKind = iota
 	resultPage
 	resultDetails
+	resultWorkflow
 )
 
 type loadResult struct {
@@ -39,6 +40,7 @@ type loadResult struct {
 	hash       model.Hash
 	done       bool
 	err        error
+	workflow   *workflowResult
 }
 
 // Model owns the application shell and coordinates repository work.
@@ -69,6 +71,7 @@ type Model struct {
 	generation  uint64
 	startQueued bool
 	closed      bool
+	tools       tools
 }
 
 // New loads settings. Repository I/O starts after the window's first paint.
@@ -84,6 +87,7 @@ func New(configDir, initialPath string) (*Model, error) {
 	m.log.OnBranch = m.changeBranch
 	m.log.OnPage = m.loadPage
 	m.log.OnSelect = m.loadDetails
+	m.initTools()
 	return m, nil
 }
 
@@ -116,8 +120,11 @@ func (m *Model) Page(c ui.C) {
 			m.startPage(c)
 			return
 		}
-		m.log.Page(c)
+		if !m.toolsPage(c) {
+			m.log.Page(c)
+		}
 	})
+	m.tools.rebase.Page(c)
 }
 
 func (m *Model) toolbar(c ui.C) {
@@ -128,6 +135,7 @@ func (m *Model) toolbar(c ui.C) {
 			ui.Text(c, filepath.Base(m.repo.Path)).FontSize(12).Muted()
 		}
 		ui.Spacer(c)
+		m.toolsToolbar(c)
 		if m.OnFetch == nil {
 			ui.Button(c, "Fetch").Disabled(true)
 		} else if ui.Button(c, "Fetch").Clicked() {
@@ -148,10 +156,10 @@ func (m *Model) toolbar(c ui.C) {
 		} else if ui.Button(c, "Commit").Clicked() {
 			c.After(m.OnCommit)
 		}
-		if m.repo != nil && ui.Button(c, "Refresh").Clicked() {
+		if m.repo != nil && ui.Button(c, "Refresh").Disabled(m.tools.busy).Clicked() {
 			c.After(func() { m.startOpen(m.repo.Path) })
 		}
-		if m.repo != nil && ui.Button(c, "Open repository").Clicked() {
+		if m.repo != nil && ui.Button(c, "Open repository").Disabled(m.tools.busy).Clicked() {
 			c.After(m.returnToPicker)
 		}
 	})
@@ -191,6 +199,7 @@ func (m *Model) startPage(c ui.C) {
 }
 
 func (m *Model) startOpen(path string) {
+	m.resetTools()
 	path = filepath.Clean(path)
 	m.cancelCurrent()
 	generation := m.nextGeneration()
@@ -264,6 +273,7 @@ func (m *Model) changeBranch(branch string) {
 	if m.repo == nil {
 		return
 	}
+	m.resetTools()
 	m.cancelCurrent()
 	generation := m.nextGeneration()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -323,6 +333,10 @@ func (m *Model) applyResult(result *loadResult) {
 	if result == nil || result.generation != m.generation {
 		return
 	}
+	if result.kind == resultWorkflow {
+		m.applyWorkflow(result.workflow)
+		return
+	}
 	if result.err != nil {
 		if result.kind == resultOpen && m.repo == nil {
 			m.log.Loading = false
@@ -372,6 +386,7 @@ func (m *Model) applyResult(result *loadResult) {
 }
 
 func (m *Model) returnToPicker() {
+	m.resetTools()
 	m.cancelCurrent()
 	m.nextGeneration()
 	m.repo = nil
