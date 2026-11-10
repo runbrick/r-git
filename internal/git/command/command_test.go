@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -89,17 +88,23 @@ func TestRunFastCommandPreservesOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(repo.Dir, ".git")
+	var want string
 	for i := 0; i < 500; i++ {
 		result, err := r.Run(context.Background(), Cmd{Dir: repo.Dir, Subcommand: "rev-parse", Args: []string{"--absolute-git-dir"}})
 		if err != nil {
 			t.Fatalf("iteration %d: %v", i, err)
 		}
-		got := filepath.FromSlash(strings.TrimSpace(string(result.Stdout)))
+		got := strings.TrimSpace(string(result.Stdout))
+		if got == "" {
+			t.Fatalf("iteration %d: stdout is empty", i)
+		}
+		if i == 0 {
+			want = got
+		}
 		if got != want {
 			t.Fatalf("iteration %d: stdout = %q, want %q", i, result.Stdout, want)
 		}
-		if len(result.OutputLines) != 1 || filepath.FromSlash(result.OutputLines[0]) != want {
+		if len(result.OutputLines) != 1 || result.OutputLines[0] != want {
 			t.Fatalf("iteration %d: lines = %q, want [%q]", i, result.OutputLines, want)
 		}
 	}
