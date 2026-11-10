@@ -17,6 +17,13 @@ type LogQuery struct {
 	Paths          []string
 }
 
+// CommitParents preserves git log's topological display order while mapping
+// each commit to its parent hashes.
+type CommitParents struct {
+	Commit  model.Hash
+	Parents []model.Hash
+}
+
 // Log reads a page of commits using NUL-delimited fields, following the
 // field-oriented record scheme used by GitLogParser without ambiguous paths.
 func (r *Repo) Log(ctx context.Context, q LogQuery) ([]model.Commit, error) {
@@ -140,9 +147,42 @@ func (r *Repo) Parents(ctx context.Context, rev string) (map[model.Hash][]model.
 	return result, nil
 }
 
+// ParentsOrdered returns commits newest first in git log --topo-order order.
+// Unlike Parents, this representation retains the order needed by graph views.
+func (r *Repo) ParentsOrdered(ctx context.Context, rev string) ([]CommitParents, error) {
+	if rev == "" {
+		rev = "HEAD"
+	}
+	out, err := r.run(ctx, "log", "--topo-order", "--format=%H %P", rev)
+	if err != nil {
+		return nil, err
+	}
+	var result []CommitParents
+	for _, line := range strings.Split(strings.TrimSpace(string(out.Stdout)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		hash, err := model.ParseHash(fields[0])
+		if err != nil {
+			return nil, err
+		}
+		entry := CommitParents{Commit: hash}
+		for _, value := range fields[1:] {
+			parent, err := model.ParseHash(value)
+			if err != nil {
+				return nil, err
+			}
+			entry.Parents = append(entry.Parents, parent)
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+
 // ChangedFiles returns a commit's name-status changes, including rename origins.
 func (r *Repo) ChangedFiles(ctx context.Context, hash model.Hash) ([]model.FileChange, error) {
-	out, err := r.run(ctx, "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", "-M", "-C", hash.String())
+	out, err := r.run(ctx, "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", "-M", "-C", "--find-copies-harder", hash.String())
 	if err != nil {
 		return nil, err
 	}
