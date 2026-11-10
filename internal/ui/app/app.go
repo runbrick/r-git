@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -286,6 +288,7 @@ func (m *Model) startOpen(path string) {
 			out.snap, err = out.repo.Snapshot(ctx)
 			out.err = err
 		}
+		fmt.Fprintf(os.Stderr, "e2e-open err=%v commits=%d\n", out.err, len(out.commits))
 		m.publish(&out)
 	}()
 }
@@ -376,6 +379,7 @@ func (m *Model) publish(result *loadResult) {
 		m.pending = append(m.pending, result)
 	}
 	m.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "e2e-publish kind=%d accepted=%v\n", result.kind, accepted)
 	if accepted {
 		m.invalidator.Invalidate()
 	}
@@ -383,6 +387,7 @@ func (m *Model) publish(result *loadResult) {
 
 // applyPending runs only on Viva's window thread, before the repaint it wakes.
 func (m *Model) applyPending() {
+	fmt.Fprintf(os.Stderr, "e2e-wake\n")
 	m.mu.Lock()
 	results := m.pending
 	m.pending = nil
