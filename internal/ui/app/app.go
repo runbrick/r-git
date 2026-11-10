@@ -2,9 +2,8 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/runbrick/r-git/internal/config"
@@ -13,47 +12,78 @@ import (
 	"github.com/runbrick/r-git/internal/git/repo"
 	logview "github.com/runbrick/r-git/internal/ui/log"
 	viva "github.com/vivaui/viva/app"
-	"github.com/vivaui/viva/gfx"
 	"github.com/vivaui/viva/ui"
 )
 
 const pageSize = 100
 
-// Model owns the window state and its repository lifecycle.
+type resultKind uint8
+
+const (
+	resultOpen resultKind = iota
+	resultPage
+	resultDetails
+)
+
+type loadResult struct {
+	kind       resultKind
+	generation uint64
+	path       string
+	branch     string
+	repo       *repo.Repo
+	ordered    []repo.CommitParents
+	graph      *logview.GraphRows
+	graphIndex map[model.Hash]int
+	commits    []model.Commit
+	details    []model.FileChange
+	hash       model.Hash
+	done       bool
+	err        error
+}
+
+// Model owns the application shell and coordinates repository work.
 type Model struct {
 	configDir  string
 	appConfig  config.AppSettings
 	repoConfig config.RepoSettings
-	path       string
+	initial    string
 	pathEntry  string
-	filter     string
-	branch     string
-	branches   []string
 	repo       *repo.Repo
-	commits    []model.Commit
-	graphRows  []int
-	graph      *logview.GraphRows
-	loading    bool
-	done       bool
+	log        logview.View
+	branches   []string
+	choices    []string
 	err        string
-	list       ui.ListState
-	selected   model.Hash
-	details    []model.FileChange
-	message    string
+
+	OnFetch    func()
+	OnPull     func()
+	OnPush     func()
+	OnCommit   func()
+	OnShowDiff func(model.Hash, string)
+
+	invalidator viva.Invalidator
+	mu          sync.Mutex
+	pending     *loadResult
+	ctx         context.Context
+	cancel      context.CancelFunc
+	workers     sync.WaitGroup
+	generation  uint64
+	startQueued bool
+	closed      bool
 }
 
-// New loads settings and opens initialPath when supplied.
+// New loads settings. Repository I/O starts after the window's first paint.
 func New(configDir, initialPath string) (*Model, error) {
 	settings, err := config.LoadApp(configDir)
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{configDir: configDir, appConfig: settings, pathEntry: initialPath, branch: "All branches"}
-	if initialPath != "" {
-		if err := m.open(initialPath); err != nil {
-			m.err = err.Error()
-		}
-	}
+	m := &Model{configDir: configDir, appConfig: settings, initial: initialPath, pathEntry: initialPath}
+	m.log.Branch = "All branches"
+	m.log.Choices = []string{"All branches"}
+	m.log.Done = initialPath == ""
+	m.log.OnBranch = m.changeBranch
+	m.log.OnPage = m.loadPage
+	m.log.OnSelect = m.loadDetails
 	return m, nil
 }
 
@@ -63,19 +93,30 @@ func Run(configDir, initialPath string) error {
 	if err != nil {
 		return err
 	}
-	return ui.Run(viva.Config{Title: "r-git", Width: 1120, Height: 760}, m.Page)
+	return ui.Run(m.config(), m.Page)
 }
 
-// Page declares the main window.
+func (m *Model) config() viva.Config {
+	return viva.Config{Title: "r-git", Width: 1120, Height: 760, Invalidator: &m.invalidator,
+		OnWake:   m.applyPending,
+		OnClosed: func() { m.stopWorkers() },
+	}
+}
+
+// Page composes the toolbar and either the repository picker or log view.
 func (m *Model) Page(c ui.C) {
 	theme := c.Theme()
+	if m.repo == nil && m.initial != "" && !m.startQueued {
+		m.startQueued = true
+		m.startOpen(m.initial)
+	}
 	ui.Column(c).Fill().Background(theme.Background).Children(func() {
 		m.toolbar(c)
 		if m.repo == nil {
 			m.startPage(c)
 			return
 		}
-		m.logPage(c)
+		m.log.Page(c)
 	})
 }
 
@@ -87,15 +128,31 @@ func (m *Model) toolbar(c ui.C) {
 			ui.Text(c, filepath.Base(m.repo.Path)).FontSize(12).Muted()
 		}
 		ui.Spacer(c)
-		ui.Button(c, "Fetch").Disabled(true)
-		ui.Button(c, "Pull").Disabled(true)
-		ui.Button(c, "Push").Disabled(true)
-		ui.Button(c, "Commit").Disabled(true)
+		if m.OnFetch == nil {
+			ui.Button(c, "Fetch").Disabled(true)
+		} else if ui.Button(c, "Fetch").Clicked() {
+			c.After(m.OnFetch)
+		}
+		if m.OnPull == nil {
+			ui.Button(c, "Pull").Disabled(true)
+		} else if ui.Button(c, "Pull").Clicked() {
+			c.After(m.OnPull)
+		}
+		if m.OnPush == nil {
+			ui.Button(c, "Push").Disabled(true)
+		} else if ui.Button(c, "Push").Clicked() {
+			c.After(m.OnPush)
+		}
+		if m.OnCommit == nil {
+			ui.Button(c, "Commit").Disabled(true)
+		} else if ui.Button(c, "Commit").Clicked() {
+			c.After(m.OnCommit)
+		}
 		if m.repo != nil && ui.Button(c, "Refresh").Clicked() {
-			c.After(func() { m.refresh() })
+			c.After(func() { m.startOpen(m.repo.Path) })
 		}
 		if m.repo != nil && ui.Button(c, "Open repository").Clicked() {
-			c.After(func() { m.repo = nil })
+			c.After(m.returnToPicker)
 		}
 	})
 }
@@ -107,7 +164,7 @@ func (m *Model) startPage(c ui.C) {
 			field := ui.TextField(c, &m.pathEntry, "Repository path", "Path to a Git working tree").Grow(1)
 			if field.Submitted() || ui.Button(c, "Open").Clicked() {
 				path := m.pathEntry
-				c.After(func() { m.openFromUI(path) })
+				c.After(func() { m.startOpen(path) })
 			}
 		})
 		if m.err != "" {
@@ -119,320 +176,220 @@ func (m *Model) startPage(c ui.C) {
 				for _, recent := range m.appConfig.Recent {
 					item := recent
 					ui.Row(c.Key(item.Path)).FillWidth().Pad(8).Gap(12).Items(ui.Center).Background(c.Theme().Card).Children(func() {
-						ui.Column(c).Grow(1).Gap(2).Children(func() {
-							ui.Text(c, item.DisplayName).Bold()
-							ui.Text(c, item.Path).FontSize(12).Muted()
-						})
+						ui.Column(c).Grow(1).Gap(2).Children(func() { ui.Text(c, item.DisplayName).Bold(); ui.Text(c, item.Path).FontSize(12).Muted() })
 						if ui.Button(c, "Open").Clicked() {
-							c.After(func() { m.openFromUI(item.Path) })
+							c.After(func() { m.startOpen(item.Path) })
 						}
 					})
 				}
 			})
 		}
+		if m.log.Loading {
+			ui.Text(c, "Loading repository...").FontSize(12).Muted()
+		}
 	})
 }
 
-func (m *Model) logPage(c ui.C) {
-	theme := c.Theme()
-	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Pad(12).Gap(8).Items(ui.Center).Background(theme.Background).Children(func() {
-			search := ui.TextField(c, &m.filter, "Filter", "Subject or hash")
-			search.Grow(1)
-			choices := append([]string{"All branches"}, m.branches...)
-			if len(choices) == 1 {
-				choices = []string{"All branches"}
-			}
-			oldBranch := m.branch
-			ui.Select(c, &m.branch, choices, nil)
-			if oldBranch != m.branch {
-				branch := m.branch
-				c.After(func() { m.changeBranch(branch) })
-			}
-		})
-		ui.Row(c).Fill().Children(func() {
-			ui.Column(c).Grow(1).Fill().Children(func() {
-				m.list.RowWidth = 900
-				ui.Row(c).FillWidth().PadX(12).PadY(6).Gap(12).Background(theme.Card).Children(func() {
-					ui.Text(c, "Graph").Width(44).FontSize(11).Muted()
-					ui.Text(c, "Subject").Grow(1).FontSize(11).Muted()
-					ui.Text(c, "Author").Width(140).FontSize(11).Muted()
-					ui.Text(c, "Date").Width(100).FontSize(11).Muted()
-					ui.Text(c, "Hash").Width(76).FontSize(11).Muted()
-				})
-				visible := m.visibleCommits()
-				ui.List(c, &m.list, len(visible), func(row ui.ListRow) {
-					index := visible[row.Index]
-					commit := m.commits[index]
-					bg := theme.Background
-					if row.Selected() {
-						bg = theme.Accent
-					}
-					row.Element.FillWidth().Height(34).PadX(12).Gap(12).Items(ui.Center).Background(bg).DrawOver(func(d *ui.DrawContext) {
-						m.drawGraph(d, m.graphRows[index])
-					}).Children(func() {
-						ui.Slot(row.C).Width(44).Height(28)
-						ui.Column(row.C).Grow(1).Gap(2).Children(func() {
-							ui.Row(row.C).Gap(6).Items(ui.Center).Children(func() {
-								for _, label := range m.labels(commit.Hash) {
-									ui.Text(row.C, label).FontSize(10).Bold().Color(theme.AccentForeground).Background(theme.Accent).PadX(5).PadY(2).Radius(theme.Metrics.RadiusControl)
-								}
-								ui.Text(row.C, commit.Subject).FontSize(13)
-							})
-						})
-						ui.Text(row.C, commit.Author.Name).Width(140).FontSize(12).Muted()
-						ui.Text(row.C, relative(commit.Author.When)).Width(100).FontSize(12).Muted()
-						ui.Text(row.C, commit.Hash.Short()).Width(76).FontSize(11).Muted().Mono()
-					})
-				})
-				if m.list.Changed() {
-					if index := m.list.Selected(); index >= 0 && index < len(visible) {
-						m.selectCommit(m.commits[visible[index]].Hash)
-					}
-				}
-				if selected := m.list.Selected(); selected >= 0 && selected < len(visible) && !m.commits[visible[selected]].Hash.Equal(m.selected) {
-					m.selectCommit(m.commits[visible[selected]].Hash)
-				}
-				_, last := m.list.Visible()
-				if last >= len(visible)-10 && !m.done && !m.loading {
-					c.After(m.loadNext)
-				}
-				ui.Text(c, fmt.Sprintf("%d commits", len(m.commits))).FillWidth().PadX(12).PadY(5).FontSize(11).Muted()
-				if m.err != "" {
-					ui.Text(c, m.err).PadX(12).FontSize(12).Color(theme.Danger)
-				}
-			})
-			ui.Divider(c)
-			m.detailPane(c)
-		})
-	})
-}
-
-func (m *Model) detailPane(c ui.C) {
-	theme := c.Theme()
-	ui.Column(c).Width(320).FillHeight().Pad(16).Gap(10).Background(theme.Card).Children(func() {
-		commit, ok := m.selectedCommit()
-		if !ok {
-			ui.Text(c, "Select a commit").Muted()
-			return
+func (m *Model) startOpen(path string) {
+	path = filepath.Clean(path)
+	m.cancelCurrent()
+	generation := m.nextGeneration()
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx, m.cancel, m.log.Loading = ctx, cancel, true
+	m.log.Error, m.err = "", ""
+	m.workers.Add(1)
+	go func() {
+		defer m.workers.Done()
+		out := loadResult{kind: resultOpen, generation: generation, path: path}
+		runner, err := command.New()
+		if err == nil {
+			out.repo, err = repo.OpenWithExecutor(ctx, path, runner)
 		}
-		ui.Text(c, commit.Subject).FontSize(15).Bold()
-		ui.Text(c, commit.Message).FontSize(12)
-		ui.Divider(c)
-		ui.Text(c, "Author").FontSize(11).Muted()
-		ui.Text(c, fmt.Sprintf("%s <%s>", commit.Author.Name, commit.Author.Email)).FontSize(12)
-		ui.Text(c, "Committer").FontSize(11).Muted()
-		ui.Text(c, fmt.Sprintf("%s <%s>", commit.Committer.Name, commit.Committer.Email)).FontSize(12)
-		ui.Text(c, "Parents").FontSize(11).Muted()
-		parents := make([]string, len(commit.Parents))
-		for i, parent := range commit.Parents {
-			parents[i] = parent.Short()
+		if err == nil {
+			out.ordered, err = out.repo.ParentsOrdered(ctx, "HEAD")
 		}
-		ui.Text(c, strings.Join(parents, "  ")).FontSize(12).Mono()
-		ui.Text(c, "Changed files").FontSize(11).Muted()
-		ui.Scroll(c).Grow(1).Gap(4).Children(func() {
-			for _, change := range m.details {
-				label := change.Status.String() + "  " + change.Path
-				if change.OrigPath != "" {
-					label += "  <- " + change.OrigPath
-				}
-				ui.Text(c, label).FontSize(12).Mono()
-			}
-		})
-	})
-}
-
-func (m *Model) drawGraph(d *ui.DrawContext, row int) {
-	buffer := m.graph.Row(row)
-	if buffer == nil {
-		return
-	}
-	colors := d.Theme.Chart
-	center := d.Rect.X + 20
-	middle := d.Rect.Y + d.Rect.Height/2
-	for _, edge := range buffer.Edges {
-		color := colors[edge.ColorId%len(colors)]
-		x := d.Rect.X + 8 + float32(edge.PositionInCurrentRow)*12
-		d.Canvas.Fill(ui.Rect{X: x, Y: d.Rect.Y + 3, Width: 2, Height: d.Rect.Height - 6}, color)
-		if edge.HasArrow {
-			glyph := "↓"
-			if edge.EdgePrintType == 0 {
-				glyph = "↑"
-			}
-			d.Canvas.Label(glyph, ui.Rect{X: x - 4, Y: middle - 8, Width: 10, Height: 16}, gfx.TextStyle{Size: 12, Color: color})
+		if err == nil {
+			out.graph, out.graphIndex, err = logview.NewGraphRows(out.ordered)
 		}
-	}
-	for _, node := range buffer.Nodes {
-		color := colors[node.ColorId%len(colors)]
-		x := d.Rect.X + 8 + float32(node.PositionInCurrentRow)*12
-		d.Canvas.Rounded(ui.Rect{X: x - 4, Y: middle - 4, Width: 10, Height: 10}, 5, color)
-	}
-	_ = center
-}
-
-func (m *Model) visibleCommits() []int {
-	visible := make([]int, 0, len(m.commits))
-	for i, commit := range m.commits {
-		if m.filter != "" && !strings.Contains(strings.ToLower(commit.Subject+" "+commit.Hash.String()), strings.ToLower(m.filter)) {
-			continue
+		if err == nil {
+			out.commits, err = out.repo.Log(ctx, repo.LogQuery{MaxCount: pageSize})
 		}
-		visible = append(visible, i)
-	}
-	return visible
-}
-
-func (m *Model) labels(hash model.Hash) []string {
-	var labels []string
-	if !m.repo.HEAD.IsZero() && hash.Equal(m.repo.HEAD) {
-		labels = append(labels, "HEAD")
-	}
-	for _, ref := range m.repo.Branches {
-		if ref.Hash.Equal(hash) {
-			labels = append(labels, ref.Ref.Name())
+		if err == nil {
+			out.done = len(out.commits) < pageSize
 		}
-	}
-	for _, ref := range m.repo.Tags {
-		if ref.Hash.Equal(hash) {
-			labels = append(labels, ref.Ref.Name())
-		}
-	}
-	return labels
+		out.err = err
+		m.publish(&out)
+	}()
 }
 
-func relative(when time.Time) string {
-	delta := time.Since(when)
-	switch {
-	case delta < time.Minute:
-		return "just now"
-	case delta < time.Hour:
-		return fmt.Sprintf("%dm ago", int(delta.Minutes()))
-	case delta < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(delta.Hours()))
-	case delta < 30*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(delta.Hours()/24))
-	default:
-		return when.Format("2006-01-02")
-	}
-}
-
-func (m *Model) openFromUI(path string) {
-	if err := m.open(path); err != nil {
-		m.err = err.Error()
-	}
-}
-
-func (m *Model) open(path string) error {
-	runner, err := command.New()
-	if err != nil {
-		return err
-	}
-	opened, err := repo.OpenWithExecutor(context.Background(), path, runner)
-	if err != nil {
-		return err
-	}
-	repoSettings, err := config.LoadRepo(m.configDir, opened.Path)
-	if err != nil {
-		return err
-	}
-	m.repo, m.repoConfig, m.path = opened, repoSettings, opened.Path
-	m.pathEntry, m.err, m.branch = opened.Path, "", "All branches"
-	m.branches = []string{}
-	for _, branch := range opened.Branches {
-		if branch.Ref.Kind() == model.KindLocalBranch {
-			m.branches = append(m.branches, branch.Ref.Name())
-		}
-	}
-	m.commits, m.list = nil, ui.ListState{}
-	m.done = false
-	if err := m.appConfig.TouchRecent(opened.Path, filepath.Base(opened.Path), time.Now().UnixMilli()); err == nil {
-		_ = config.SaveApp(m.configDir, m.appConfig)
-	}
-	m.loadNext()
-	return nil
-}
-
-func (m *Model) refresh() {
+func (m *Model) loadPage(branch string, skip int) {
 	if m.repo == nil {
 		return
 	}
-	opened, err := repo.Open(context.Background(), m.repo.Path)
-	if err != nil {
-		m.err = err.Error()
-		return
+	ctx, repository := m.ctx, m.repo
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	m.repo = opened
-	m.commits, m.list = nil, ui.ListState{}
-	m.done, m.err = false, ""
-	m.loadNext()
+	generation := m.generation
+	m.log.Loading, m.log.Error = true, ""
+	m.workers.Add(1)
+	go func() {
+		defer m.workers.Done()
+		query := repo.LogQuery{MaxCount: pageSize, Skip: skip}
+		if branch != "" && branch != "All branches" {
+			query.Branch = branch
+		}
+		commits, err := repository.Log(ctx, query)
+		m.publish(&loadResult{kind: resultPage, generation: generation, commits: commits, done: len(commits) < pageSize, err: err})
+	}()
 }
 
-func (m *Model) loadNext() {
-	if m.repo == nil || m.loading || m.done {
+func (m *Model) loadDetails(hash model.Hash) {
+	if m.repo == nil {
 		return
 	}
-	m.loading = true
-	query := repo.LogQuery{MaxCount: pageSize, Skip: len(m.commits)}
-	if m.branch != "" && m.branch != "All branches" {
-		query.Branch = m.branch
+	ctx, generation, repository := m.ctx, m.generation, m.repo
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	commits, err := m.repo.Log(context.Background(), query)
-	m.loading = false
-	if err != nil {
-		m.err = err.Error()
-		return
-	}
-	m.commits = append(m.commits, commits...)
-	m.done = len(commits) < pageSize
-	ordered, err := m.repo.ParentsOrdered(context.Background(), query.Branch)
-	if err != nil {
-		m.err = err.Error()
-		return
-	}
-	m.graph = logview.NewGraphRows(ordered)
-	graphIndex := make(map[string]int, len(ordered))
-	for i, item := range ordered {
-		graphIndex[item.Commit.String()] = i
-	}
-	m.graphRows = m.graphRows[:0]
-	for _, commit := range m.commits {
-		m.graphRows = append(m.graphRows, graphIndex[commit.Hash.String()])
-	}
-	if m.selected.IsZero() && len(m.commits) > 0 {
-		m.list.Select(0)
-		m.selectCommit(m.commits[0].Hash)
-	}
+	m.workers.Add(1)
+	go func() {
+		defer m.workers.Done()
+		files, err := repository.ChangedFiles(ctx, hash)
+		m.publish(&loadResult{kind: resultDetails, generation: generation, hash: hash, details: files, err: err})
+	}()
 }
 
 func (m *Model) changeBranch(branch string) {
 	if m.repo == nil {
 		return
 	}
-	m.branch = branch
-	m.commits, m.graphRows = nil, nil
-	m.graph = nil
-	m.list = ui.ListState{}
-	m.selected = model.Hash{}
-	m.done = false
-	m.loadNext()
+	m.cancelCurrent()
+	generation := m.nextGeneration()
+	ctx, cancel := context.WithCancel(context.Background())
+	m.ctx, m.cancel = ctx, cancel
+	m.log.ResetBranch(branch)
+	m.log.SetRefs(m.repo.HEAD, m.repo.Branches, m.repo.Tags)
+	repository := m.repo
+	m.workers.Add(1)
+	go func() {
+		defer m.workers.Done()
+		queryBranch := branch
+		if branch == "All branches" {
+			queryBranch = "HEAD"
+		}
+		ordered, err := repository.ParentsOrdered(ctx, queryBranch)
+		var graphRows *logview.GraphRows
+		var graphIndex map[model.Hash]int
+		if err == nil {
+			graphRows, graphIndex, err = logview.NewGraphRows(ordered)
+		}
+		var commits []model.Commit
+		if err == nil {
+			query := repo.LogQuery{MaxCount: pageSize, Branch: queryBranch}
+			if queryBranch == "HEAD" {
+				query.Branch = ""
+			}
+			commits, err = repository.Log(ctx, query)
+		}
+		m.publish(&loadResult{kind: resultOpen, generation: generation, path: repository.Path, branch: branch, repo: repository, ordered: ordered, graph: graphRows, graphIndex: graphIndex, commits: commits, done: len(commits) < pageSize, err: err})
+	}()
 }
 
-func (m *Model) selectCommit(hash model.Hash) {
-	m.selected = hash
-	if m.repo != nil {
-		m.details, _ = m.repo.ChangedFiles(context.Background(), hash)
-		if commit, ok := m.find(hash); ok {
-			m.message = commit.Message
+func (m *Model) publish(result *loadResult) {
+	m.mu.Lock()
+	accepted := !m.closed && result.generation == m.generation
+	if accepted {
+		m.pending = result
+	}
+	m.mu.Unlock()
+	if accepted {
+		m.invalidator.Invalidate()
+	}
+}
+
+// applyPending runs only on Viva's window thread, before the repaint it wakes.
+func (m *Model) applyPending() {
+	m.mu.Lock()
+	result := m.pending
+	m.pending = nil
+	m.mu.Unlock()
+	if result == nil || result.generation != m.generation {
+		return
+	}
+	if result.err != nil {
+		if result.kind == resultOpen && m.repo == nil {
+			m.log.Loading = false
+			m.err = result.err.Error()
+		} else {
+			m.log.SetError(result.err)
+		}
+		return
+	}
+	switch result.kind {
+	case resultOpen:
+		m.repo = result.repo
+		m.repoConfig, _ = config.LoadRepo(m.configDir, result.repo.Path)
+		m.pathEntry = result.repo.Path
+		m.branches, m.choices = nil, []string{"All branches"}
+		for _, branch := range result.repo.Branches {
+			if branch.Ref.Kind() == model.KindLocalBranch {
+				m.branches = append(m.branches, branch.Ref.Name())
+				m.choices = append(m.choices, branch.Ref.Name())
+			}
+		}
+		m.log.Choices, m.log.Branches = m.choices, m.branches
+		if result.branch == "" {
+			m.log.Branch = "All branches"
+		} else {
+			m.log.Branch = result.branch
+		}
+		m.log.SetRefs(result.repo.HEAD, result.repo.Branches, result.repo.Tags)
+		m.log.SetGraph(result.graph, result.graphIndex)
+		m.log.Commits, m.log.Done, m.log.Loading = nil, false, false
+		m.log.AppendPage(result.commits, result.done)
+		if len(result.commits) > 0 {
+			m.log.Select(result.commits[0].Hash)
+			m.loadDetails(result.commits[0].Hash)
+		}
+		m.err = ""
+		if err := m.appConfig.TouchRecent(result.repo.Path, filepath.Base(result.repo.Path), time.Now().UnixMilli()); err == nil {
+			_ = config.SaveApp(m.configDir, m.appConfig)
+		}
+	case resultPage:
+		m.log.AppendPage(result.commits, result.done)
+	case resultDetails:
+		if result.hash.Equal(m.log.Selected()) {
+			m.log.Details = result.details
 		}
 	}
 }
 
-func (m *Model) find(hash model.Hash) (model.Commit, bool) {
-	for _, commit := range m.commits {
-		if commit.Hash.Equal(hash) {
-			return commit, true
-		}
+func (m *Model) returnToPicker() {
+	m.cancelCurrent()
+	m.nextGeneration()
+	m.repo = nil
+	m.log.Loading = false
+}
+func (m *Model) cancelCurrent() {
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
 	}
-	return model.Commit{}, false
+}
+func (m *Model) stopWorkers() {
+	m.mu.Lock()
+	m.closed = true
+	m.pending = nil
+	m.mu.Unlock()
+	m.cancelCurrent()
+	m.workers.Wait()
 }
 
-func (m *Model) selectedCommit() (model.Commit, bool) { return m.find(m.selected) }
+func (m *Model) nextGeneration() uint64 {
+	m.mu.Lock()
+	m.generation++
+	generation := m.generation
+	m.mu.Unlock()
+	return generation
+}
