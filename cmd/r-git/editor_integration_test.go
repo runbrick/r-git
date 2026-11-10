@@ -15,14 +15,6 @@ import (
 )
 
 func TestBuiltBinaryRunsInteractiveRebaseEditor(t *testing.T) {
-	repo := testutil.NewRepo(t)
-	repo.WriteFile("base.txt", "base\n")
-	repo.Commit("base")
-	repo.WriteFile("one.txt", "one\n")
-	repo.Commit("first commit")
-	repo.WriteFile("two.txt", "two\n")
-	repo.Commit("second commit")
-
 	binary := filepath.Join(t.TempDir(), "r-git")
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
@@ -31,6 +23,14 @@ func TestBuiltBinaryRunsInteractiveRebaseEditor(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build r-git: %v\n%s", err, output)
 	}
+
+	repo := testutil.NewRepo(t)
+	repo.WriteFile("base.txt", "base\n")
+	repo.Commit("base")
+	repo.WriteFile("one.txt", "one\n")
+	repo.Commit("first commit")
+	repo.WriteFile("two.txt", "two\n")
+	repo.Commit("second commit")
 
 	runner, err := command.New()
 	if err != nil {
