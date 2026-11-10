@@ -49,11 +49,8 @@ func TestGraphLayoutBuilder(t *testing.T) {
 			}
 
 			layout := graph.BuildLayout(lg, func(id1, id2 int32) int {
-				s1 := fmt.Sprintf("%x", id1)
-				s2 := fmt.Sprintf("%x", id2)
-				if tc == "headsOrder" {
-					fmt.Printf("id1=%d(hex=%s) id2=%d(hex=%s) cmp=%d\n", id1, s1, id2, s2, strings.Compare(s1, s2))
-				}
+				s1 := fmt.Sprintf("%x", nodes[id1].Id)
+				s2 := fmt.Sprintf("%x", nodes[id2].Id)
 				return strings.Compare(s1, s2)
 			})
 

@@ -56,12 +56,12 @@ func ParseNodes(lines string) ([]graph.Node, error) {
 		if line == "" {
 			continue
 		}
-		
+
 		parsed, err := ParseLine(line)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		node := graph.Node{Id: parsed.NodeId}
 		for _, edge := range parsed.Edges {
 			id, err := ParseNodeId(edge)
@@ -144,38 +144,38 @@ func parseEdgeType(c byte) graph.EdgeType {
 // ParseLinearGraph parses LinearGraph representations with types like `0_U|-1_U 3_D`
 func ParseLinearGraph(lines string) (graph.LinearGraph, error) {
 	linesArr := strings.Split(lines, "\n")
-	
+
 	nodeIdToNodeIndex := make(map[int32]int)
-	
+
 	type parsedEdge struct {
 		nodeId int32
 		char   byte
 	}
-	
+
 	edges := make([][]parsedEdge, 0)
 	nodeIds := make([]int32, 0)
-	
+
 	for _, line := range linesArr {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		
+
 		sepIndex := strings.Index(line, "|-")
 		if sepIndex == -1 {
 			return nil, fmt.Errorf("separator not found in line: %s", line)
 		}
-		
+
 		left := line[:sepIndex]
 		charVal := left[len(left)-1]
 		nodeId, err := ParseNodeId(left[:len(left)-2])
 		if err != nil {
 			return nil, err
 		}
-		
+
 		nodeIdToNodeIndex[nodeId] = len(nodeIds)
 		nodeIds = append(nodeIds, nodeId)
-		
+
 		right := line[sepIndex+2:]
 		var normalEdges []parsedEdge
 		if strings.TrimSpace(right) != "" {
@@ -191,15 +191,15 @@ func ParseLinearGraph(lines string) (graph.LinearGraph, error) {
 		edges = append(edges, normalEdges)
 		_ = charVal
 	}
-	
+
 	upEdges := make(map[int][]graph.GraphEdge)
 	downEdges := make(map[int][]graph.GraphEdge)
-	
+
 	for nodeIndex, nodeEdges := range edges {
 		for _, parsedEdge := range nodeEdges {
 			edgeType := parseEdgeType(parsedEdge.char)
 			var edge graph.GraphEdge
-			
+
 			if edgeType == graph.Usual {
 				downNodeIndex := nodeIdToNodeIndex[parsedEdge.nodeId]
 				edge = graph.GraphEdge{
@@ -210,7 +210,7 @@ func ParseLinearGraph(lines string) (graph.LinearGraph, error) {
 			} else {
 				edge = graph.CreateEdgeWithTargetId(int32(nodeIndex), parsedEdge.nodeId, edgeType)
 			}
-			
+
 			if edge.UpNodeIndex >= 0 {
 				downEdges[int(edge.UpNodeIndex)] = append(downEdges[int(edge.UpNodeIndex)], edge)
 			}
@@ -219,7 +219,7 @@ func ParseLinearGraph(lines string) (graph.LinearGraph, error) {
 			}
 		}
 	}
-	
+
 	g := &TestLinearGraphWithElementsInfo{
 		nodesCount: len(nodeIds),
 		upEdges:    upEdges,
@@ -230,6 +230,6 @@ func ParseLinearGraph(lines string) (graph.LinearGraph, error) {
 	for idx, id := range nodeIds {
 		g.nodeIdMap[idx] = id
 	}
-	
+
 	return g, nil
 }

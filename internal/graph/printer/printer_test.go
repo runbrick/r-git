@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/runbrick/r-git/internal/graph"
@@ -41,5 +42,38 @@ func TestPrintElementGenerator(t *testing.T) {
 
 	if len(buf.Nodes) == 0 {
 		t.Errorf("expected nodes in row 0")
+	}
+}
+
+func TestPreparedRowsMatchesGeneratorWithoutQueryAllocations(t *testing.T) {
+	nodes := []graph.Node{
+		{Id: 0, Parents: []int32{1, 2}},
+		{Id: 1, Parents: []int32{3}},
+		{Id: 2, Parents: []int32{3}},
+		{Id: 3},
+	}
+	lg, err := graph.NewLinearGraph(nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := graph.BuildLayout(lg, func(a, b int32) int { return int(a - b) })
+	pm := &PresentationManager{
+		ColorGetter: NewGraphColorGetterByHead(layout, lg, &dummyColorManager{}),
+		LinearGraph: lg,
+		Layout:      layout,
+	}
+	gen := NewPrintElementGenerator(lg, pm, true)
+	prepared := gen.PrepareRows()
+	buf := prepared.NewBuffer()
+	var expected RowBuffer
+	for row := 0; row < lg.NodesCount(); row++ {
+		gen.GetRow(row, &expected)
+		prepared.GetRow(row, buf)
+		if !reflect.DeepEqual(*buf, expected) {
+			t.Fatalf("row %d differs: got %#v, want %#v", row, *buf, expected)
+		}
+	}
+	if allocs := testing.AllocsPerRun(100, func() { prepared.GetRow(1, buf) }); allocs != 0 {
+		t.Fatalf("prepared row query allocated %v times", allocs)
 	}
 }

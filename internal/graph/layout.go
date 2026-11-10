@@ -49,8 +49,10 @@ func getLayoutIndexesForHeads(layoutIndexes []int, headNodeIndexes []int) []int 
 
 func getHeads(graph LinearGraph) []int {
 	var heads []int
+	var edgeBuffer [8]GraphEdge
 	for i := 0; i < graph.NodesCount(); i++ {
-		if len(GetUpNodes(graph, i)) == 0 {
+		edges := graph.AppendAdjacentEdges(edgeBuffer[:0], i, NormalUp)
+		if len(edges) == 0 {
 			heads = append(heads, i)
 		}
 	}
@@ -90,6 +92,7 @@ func buildLayout(graph LinearGraph, branches map[int]struct{}, headsComparator f
 func doBuildLayout(graph LinearGraph, sortedHeads []int) Layout {
 	layoutIndex := make([]int, graph.NodesCount())
 	var importantHeads []int
+	var edgeBuffer [8]GraphEdge
 
 	currentLayoutIndex := 1
 	for _, head := range sortedHeads {
@@ -105,9 +108,10 @@ func doBuildLayout(graph LinearGraph, sortedHeads []int) Layout {
 				layoutIndex[currentNode] = currentLayoutIndex
 			}
 
-			downNodes := GetDownNodes(graph, currentNode)
 			var childWithoutLayoutIndex = -1
-			for _, child := range downNodes {
+			downEdges := graph.AppendAdjacentEdges(edgeBuffer[:0], currentNode, NormalDown)
+			for _, edge := range downEdges {
+				child := int(edge.DownNodeIndex)
 				if layoutIndex[child] == 0 {
 					childWithoutLayoutIndex = child
 					break

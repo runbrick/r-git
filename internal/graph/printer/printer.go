@@ -61,6 +61,67 @@ type RowBuffer struct {
 	Edges []PrintElement
 }
 
+// PreparedRows stores generated row elements contiguously so scrolling queries
+// can reuse a buffer without allocating. Build it once after the graph and
+// layout are ready; its memory use is proportional to the visible node and
+// edge elements across all rows.
+type PreparedRows struct {
+	nodes    []PrintElement
+	edges    []PrintElement
+	rows     []rowRange
+	maxNodes int
+	maxEdges int
+}
+
+type rowRange struct {
+	nodeStart int
+	nodeCount int
+	edgeStart int
+	edgeCount int
+}
+
+// PrepareRows computes print elements for every row. Callers should use
+// NewBuffer once and pass it to GetRow repeatedly while scrolling.
+func (gen *PrintElementGenerator) PrepareRows() *PreparedRows {
+	rows := &PreparedRows{rows: make([]rowRange, gen.linearGraph.NodesCount())}
+	var scratch RowBuffer
+	for row := 0; row < gen.linearGraph.NodesCount(); row++ {
+		gen.GetRow(row, &scratch)
+		r := rowRange{
+			nodeStart: len(rows.nodes), nodeCount: len(scratch.Nodes),
+			edgeStart: len(rows.edges), edgeCount: len(scratch.Edges),
+		}
+		rows.nodes = append(rows.nodes, scratch.Nodes...)
+		rows.edges = append(rows.edges, scratch.Edges...)
+		rows.rows[row] = r
+		if r.nodeCount > rows.maxNodes {
+			rows.maxNodes = r.nodeCount
+		}
+		if r.edgeCount > rows.maxEdges {
+			rows.maxEdges = r.edgeCount
+		}
+		// GetRow only needs the current row and its immediate neighbors.
+		delete(gen.cache, row-2)
+	}
+	return rows
+}
+
+// NewBuffer allocates enough room for any single prepared row.
+func (rows *PreparedRows) NewBuffer() *RowBuffer {
+	return &RowBuffer{
+		Nodes: make([]PrintElement, 0, rows.maxNodes),
+		Edges: make([]PrintElement, 0, rows.maxEdges),
+	}
+}
+
+// GetRow copies a prepared row into a reusable buffer. A buffer returned by
+// NewBuffer guarantees no allocations in this query method.
+func (rows *PreparedRows) GetRow(row int, buf *RowBuffer) {
+	r := rows.rows[row]
+	buf.Nodes = append(buf.Nodes[:0], rows.nodes[r.nodeStart:r.nodeStart+r.nodeCount]...)
+	buf.Edges = append(buf.Edges[:0], rows.edges[r.edgeStart:r.edgeStart+r.edgeCount]...)
+}
+
 func (rb *RowBuffer) Clear() {
 	rb.Nodes = rb.Nodes[:0]
 	rb.Edges = rb.Edges[:0]
