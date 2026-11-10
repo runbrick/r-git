@@ -173,13 +173,19 @@ func TestDriverAppliesPageAndDetailsPublishedBeforeOneWake(t *testing.T) {
 
 func clickControl(t *testing.T, driver *viva.Driver, label string) {
 	t.Helper()
+	var found bool
+	var x, y float32
 	for _, hit := range driver.Snapshot().Hits {
-		if hit.Label == label {
-			if err := driver.Click(hit.Bounds.X+hit.Bounds.Width/2, hit.Bounds.Y+hit.Bounds.Height/2); err != nil {
-				t.Fatal(err)
-			}
-			return
+		if hit.Label == label && (!found || hit.Bounds.X >= x) {
+			found = true
+			x, y = hit.Bounds.X+hit.Bounds.Width/2, hit.Bounds.Y+hit.Bounds.Height/2
 		}
+	}
+	if found {
+		if err := driver.Click(x, y); err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
 	var labels []string
 	for _, hit := range driver.Snapshot().Hits {

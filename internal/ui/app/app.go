@@ -10,6 +10,7 @@ import (
 	"github.com/runbrick/r-git/internal/git/command"
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/repo"
+	branchui "github.com/runbrick/r-git/internal/ui/branches"
 	logview "github.com/runbrick/r-git/internal/ui/log"
 	viva "github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/ui"
@@ -23,6 +24,7 @@ const (
 	resultOpen resultKind = iota
 	resultPage
 	resultDetails
+	resultBranch
 )
 
 type loadResult struct {
@@ -39,20 +41,25 @@ type loadResult struct {
 	hash       model.Hash
 	done       bool
 	err        error
+	note       string
+	snap       repo.Snapshot
+	ui         *branchui.UIEvent
 }
 
 // Model owns the application shell and coordinates repository work.
 type Model struct {
-	configDir  string
-	appConfig  config.AppSettings
-	repoConfig config.RepoSettings
-	initial    string
-	pathEntry  string
-	repo       *repo.Repo
-	log        logview.View
-	branches   []string
-	choices    []string
-	err        string
+	configDir     string
+	appConfig     config.AppSettings
+	repoConfig    config.RepoSettings
+	initial       string
+	pathEntry     string
+	repo          *repo.Repo
+	log           logview.View
+	branches      branchui.Session
+	runner        *command.Runner
+	localBranches []string
+	choices       []string
+	err           string
 
 	OnFetch    func()
 	OnPull     func()
@@ -69,6 +76,7 @@ type Model struct {
 	generation  uint64
 	startQueued bool
 	closed      bool
+	gitCancels  []context.CancelFunc
 }
 
 // New loads settings. Repository I/O starts after the window's first paint.
@@ -84,6 +92,9 @@ func New(configDir, initialPath string) (*Model, error) {
 	m.log.OnBranch = m.changeBranch
 	m.log.OnPage = m.loadPage
 	m.log.OnSelect = m.loadDetails
+	m.OnFetch = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionFetch}, m.startGit, m.refresh) }
+	m.OnPull = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionPull}, m.startGit, m.refresh) }
+	m.OnPush = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionPush}, m.startGit, m.refresh) }
 	return m, nil
 }
 
@@ -114,9 +125,19 @@ func (m *Model) Page(c ui.C) {
 		m.toolbar(c)
 		if m.repo == nil {
 			m.startPage(c)
-			return
+		} else {
+			ui.Row(c).Fill().Children(func() {
+				ui.Column(c).Width(320).FillHeight().Background(theme.Card).Border(1, theme.Border).Children(func() {
+					m.branches.Panel.Page(c)
+					if ui.Button(c, "Open stash").Clicked() {
+						c.After(func() { m.branches.Handle(branchui.Request{Action: branchui.ActionStash}, m.startGit, m.refresh) })
+					}
+				})
+				m.log.Page(c)
+			})
 		}
-		m.log.Page(c)
+		m.branches.Overlays(c)
+		c.After(func() { m.branches.AfterPaint(m.startGit, m.refresh) })
 	})
 }
 
@@ -218,6 +239,10 @@ func (m *Model) startOpen(path string) {
 			out.done = len(out.commits) < pageSize
 		}
 		out.err = err
+		if err == nil {
+			out.snap, err = out.repo.Snapshot(ctx)
+			out.err = err
+		}
 		m.publish(&out)
 	}()
 }
@@ -337,14 +362,14 @@ func (m *Model) applyResult(result *loadResult) {
 		m.repo = result.repo
 		m.repoConfig, _ = config.LoadRepo(m.configDir, result.repo.Path)
 		m.pathEntry = result.repo.Path
-		m.branches, m.choices = nil, []string{"All branches"}
+		m.localBranches, m.choices = nil, []string{"All branches"}
 		for _, branch := range result.repo.Branches {
 			if branch.Ref.Kind() == model.KindLocalBranch {
-				m.branches = append(m.branches, branch.Ref.Name())
+				m.localBranches = append(m.localBranches, branch.Ref.Name())
 				m.choices = append(m.choices, branch.Ref.Name())
 			}
 		}
-		m.log.Choices, m.log.Branches = m.choices, m.branches
+		m.log.Choices, m.log.Branches = m.choices, m.localBranches
 		if result.branch == "" {
 			m.log.Branch = "All branches"
 		} else {
@@ -359,6 +384,7 @@ func (m *Model) applyResult(result *loadResult) {
 			m.loadDetails(result.commits[0].Hash)
 		}
 		m.err = ""
+		m.bindBranches(result.snap)
 		if err := m.appConfig.TouchRecent(result.repo.Path, filepath.Base(result.repo.Path), time.Now().UnixMilli()); err == nil {
 			_ = config.SaveApp(m.configDir, m.appConfig)
 		}
@@ -368,7 +394,67 @@ func (m *Model) applyResult(result *loadResult) {
 		if result.hash.Equal(m.log.Selected()) {
 			m.log.Details = result.details
 		}
+	case resultBranch:
+		if result.ui != nil {
+			m.branches.ApplyUI(*result.ui)
+			if result.ui.Refresh {
+				m.refresh()
+			}
+			return
+		}
+		if result.err != nil {
+			m.branches.Panel.Error = result.err.Error()
+			return
+		}
+		m.bindBranches(result.snap)
 	}
+}
+
+func (m *Model) bindBranches(snap repo.Snapshot) {
+	if m.runner == nil {
+		runner, err := command.New()
+		if err != nil {
+			m.branches.Panel.Error = err.Error()
+			return
+		}
+		m.runner = runner
+	}
+	m.branches.SetPublisher(m.publishUI)
+	m.branches.SetRunner(m.startGit, m.refresh)
+	ahead := map[string][2]int{}
+	if name := snap.CurrentBranch.Name(); name != "" {
+		ahead[name] = [2]int{snap.Ahead, snap.Behind}
+	}
+	m.branches.Bind(m.repo, m.runner, m.repoConfig, &m.invalidator)
+	m.branches.SetSnapshot(snap, ahead)
+}
+
+func (m *Model) publishUI(event branchui.UIEvent) {
+	copied := event
+	m.publish(&loadResult{kind: resultBranch, generation: m.generation, ui: &copied})
+}
+
+func (m *Model) startGit(work func(context.Context)) {
+	if m.repo == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.gitCancels = append(m.gitCancels, cancel)
+	m.mu.Unlock()
+	m.workers.Add(1)
+	go func() {
+		defer m.workers.Done()
+		defer cancel()
+		work(ctx)
+	}()
+}
+
+func (m *Model) refresh() {
+	if m.repo == nil {
+		return
+	}
+	m.startOpen(m.repo.Path)
 }
 
 func (m *Model) returnToPicker() {
@@ -387,8 +473,12 @@ func (m *Model) stopWorkers() {
 	m.mu.Lock()
 	m.closed = true
 	m.pending = nil
+	cancels := append([]context.CancelFunc(nil), m.gitCancels...)
 	m.mu.Unlock()
 	m.cancelCurrent()
+	for _, cancel := range cancels {
+		cancel()
+	}
 	m.workers.Wait()
 }
 
