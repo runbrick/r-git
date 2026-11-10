@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Executor is the small command boundary consumed by higher-level packages.
@@ -199,6 +200,7 @@ func (r *Runner) execute(ctx context.Context, c Cmd, onLine func(Line)) (Result,
 	cmd := exec.CommandContext(ctx, r.Executable, args...)
 	cmd.Dir, cmd.Env = c.Dir, r.environment(c.Env)
 	cmd.Stdin = bytes.NewReader(c.Stdin)
+	cmd.WaitDelay = 2 * time.Second
 	configureProcess(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -222,10 +224,32 @@ func (r *Runner) execute(ctx context.Context, c Cmd, onLine func(Line)) (Result,
 	readers.Add(2)
 	go func() { defer readers.Done(); r.readStream(stdout, Stdout, onLine, &result, &mu) }()
 	go func() { defer readers.Done(); r.readStream(stderr, Stderr, onLine, &result, &mu) }()
-	wait := make(chan error, 1)
-	go func() { wait <- cmd.Wait() }()
+	readersDone := make(chan struct{})
+	cancellationDone := make(chan struct{})
+	go func() {
+		defer close(cancellationDone)
+		select {
+		case <-readersDone:
+			return
+		case <-ctx.Done():
+		}
+		// WaitDelay cannot close StdoutPipe/StderrPipe while Wait is deferred
+		// until reading completes. Bound that drain explicitly on cancellation
+		// in case an orphaned child still holds a write end open.
+		timer := time.NewTimer(cmd.WaitDelay)
+		defer timer.Stop()
+		select {
+		case <-readersDone:
+		case <-timer.C:
+			_ = stdout.Close()
+			_ = stderr.Close()
+		}
+	}()
 	readers.Wait()
-	waitErr := <-wait
+	close(readersDone)
+	<-cancellationDone
+	// Wait closes the pipe read ends; consume all output before calling it.
+	waitErr := cmd.Wait()
 	result.ExitCode = 0
 	if waitErr != nil {
 		if ctx.Err() != nil {

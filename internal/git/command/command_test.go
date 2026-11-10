@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -72,9 +73,35 @@ func TestRunCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
-	_, err = r.Run(ctx, Cmd{Dir: repo.Dir, Subcommand: "block", Config: []string{"alias.block=!sleep 5"}})
+	start := time.Now()
+	_, err = r.Run(ctx, Cmd{Dir: repo.Dir, Subcommand: "block", Config: []string{"alias.block=!sleep 5 & wait"}})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected context deadline, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Fatalf("cancellation took %v; child-held pipes should be bounded", elapsed)
+	}
+}
+
+func TestRunFastCommandPreservesOutput(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(repo.Dir, ".git")
+	for i := 0; i < 500; i++ {
+		result, err := r.Run(context.Background(), Cmd{Dir: repo.Dir, Subcommand: "rev-parse", Args: []string{"--absolute-git-dir"}})
+		if err != nil {
+			t.Fatalf("iteration %d: %v", i, err)
+		}
+		got := filepath.FromSlash(strings.TrimSpace(string(result.Stdout)))
+		if got != want {
+			t.Fatalf("iteration %d: stdout = %q, want %q", i, result.Stdout, want)
+		}
+		if len(result.OutputLines) != 1 || filepath.FromSlash(result.OutputLines[0]) != want {
+			t.Fatalf("iteration %d: lines = %q, want [%q]", i, result.OutputLines, want)
+		}
 	}
 }
 
