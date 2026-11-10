@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/runbrick/r-git/internal/config"
+	"github.com/runbrick/r-git/internal/git/ops"
 	uiapp "github.com/runbrick/r-git/internal/ui/app"
 )
 
@@ -23,6 +24,12 @@ import (
 var version = "devel"
 
 func main() {
+	if ops.HandleAskpass() {
+		return
+	}
+	if handled, exitCode := ops.RunEditorIfRequested(); handled {
+		os.Exit(exitCode)
+	}
 	opts, err := ParseArgs(os.Args[1:])
 	if err != nil {
 		if errors.Is(err, errHelp) {

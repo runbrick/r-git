@@ -10,6 +10,7 @@ import (
 	"github.com/runbrick/r-git/internal/git/command"
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/repo"
+	commitview "github.com/runbrick/r-git/internal/ui/commit"
 	logview "github.com/runbrick/r-git/internal/ui/log"
 	viva "github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/ui"
@@ -23,6 +24,8 @@ const (
 	resultOpen resultKind = iota
 	resultPage
 	resultDetails
+	resultWorkflow
+	resultCommit
 )
 
 type loadResult struct {
@@ -39,6 +42,12 @@ type loadResult struct {
 	hash       model.Hash
 	done       bool
 	err        error
+	workflow   *workflowResult
+	changes    []repo.ChangeEntry
+	message    string
+	toast      string
+	committed  bool
+	pushAfter  bool
 }
 
 // Model owns the application shell and coordinates repository work.
@@ -50,6 +59,8 @@ type Model struct {
 	pathEntry  string
 	repo       *repo.Repo
 	log        logview.View
+	commit     commitview.View
+	showCommit bool
 	branches   []string
 	choices    []string
 	err        string
@@ -69,6 +80,7 @@ type Model struct {
 	generation  uint64
 	startQueued bool
 	closed      bool
+	tools       tools
 }
 
 // New loads settings. Repository I/O starts after the window's first paint.
@@ -84,6 +96,13 @@ func New(configDir, initialPath string) (*Model, error) {
 	m.log.OnBranch = m.changeBranch
 	m.log.OnPage = m.loadPage
 	m.log.OnSelect = m.loadDetails
+	m.initTools()
+	m.commit.OnRequest = m.handleCommitRequest
+	m.commit.OnShowDiff = func(hash model.Hash, path string) {
+		if m.OnShowDiff != nil {
+			m.OnShowDiff(hash, path)
+		}
+	}
 	return m, nil
 }
 
@@ -93,14 +112,15 @@ func Run(configDir, initialPath string) error {
 	if err != nil {
 		return err
 	}
-	return ui.Run(m.config(), m.Page)
+	return viva.Run(m.config())
 }
 
 func (m *Model) config() viva.Config {
-	return viva.Config{Title: "r-git", Width: 1120, Height: 760, Invalidator: &m.invalidator,
+	page := ui.NewPage(ui.PageConfig{View: m.Page, Invalidator: &m.invalidator})
+	return page.Config(viva.Config{Title: "r-git", Width: 1120, Height: 760,
 		OnWake:   m.applyPending,
 		OnClosed: func() { m.stopWorkers() },
-	}
+	})
 }
 
 // Page composes the toolbar and either the repository picker or log view.
@@ -116,8 +136,16 @@ func (m *Model) Page(c ui.C) {
 			m.startPage(c)
 			return
 		}
+		if m.toolsPage(c) {
+			return
+		}
+		if m.showCommit {
+			m.commit.Page(c)
+			return
+		}
 		m.log.Page(c)
 	})
+	m.tools.rebase.Page(c)
 }
 
 func (m *Model) toolbar(c ui.C) {
@@ -128,6 +156,7 @@ func (m *Model) toolbar(c ui.C) {
 			ui.Text(c, filepath.Base(m.repo.Path)).FontSize(12).Muted()
 		}
 		ui.Spacer(c)
+		m.toolsToolbar(c)
 		if m.OnFetch == nil {
 			ui.Button(c, "Fetch").Disabled(true)
 		} else if ui.Button(c, "Fetch").Clicked() {
@@ -143,15 +172,23 @@ func (m *Model) toolbar(c ui.C) {
 		} else if ui.Button(c, "Push").Clicked() {
 			c.After(m.OnPush)
 		}
-		if m.OnCommit == nil {
+		if m.repo == nil {
 			ui.Button(c, "Commit").Disabled(true)
 		} else if ui.Button(c, "Commit").Clicked() {
-			c.After(m.OnCommit)
+			c.After(func() {
+				m.showCommit = !m.showCommit
+				if m.showCommit {
+					m.refreshStatus()
+				}
+				if m.OnCommit != nil {
+					m.OnCommit()
+				}
+			})
 		}
-		if m.repo != nil && ui.Button(c, "Refresh").Clicked() {
+		if m.repo != nil && ui.Button(c, "Refresh").Disabled(m.tools.busy).Clicked() {
 			c.After(func() { m.startOpen(m.repo.Path) })
 		}
-		if m.repo != nil && ui.Button(c, "Open repository").Clicked() {
+		if m.repo != nil && ui.Button(c, "Open repository").Disabled(m.tools.busy).Clicked() {
 			c.After(m.returnToPicker)
 		}
 	})
@@ -191,11 +228,15 @@ func (m *Model) startPage(c ui.C) {
 }
 
 func (m *Model) startOpen(path string) {
+	m.resetTools()
 	path = filepath.Clean(path)
-	m.cancelCurrent()
+	previous := m.cancel
 	generation := m.nextGeneration()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx, m.cancel, m.log.Loading = ctx, cancel, true
+	if previous != nil {
+		previous()
+	}
 	m.log.Error, m.err = "", ""
 	m.workers.Add(1)
 	go func() {
@@ -264,6 +305,7 @@ func (m *Model) changeBranch(branch string) {
 	if m.repo == nil {
 		return
 	}
+	m.resetTools()
 	m.cancelCurrent()
 	generation := m.nextGeneration()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -323,6 +365,14 @@ func (m *Model) applyResult(result *loadResult) {
 	if result == nil || result.generation != m.generation {
 		return
 	}
+	if result.kind == resultWorkflow {
+		m.applyWorkflow(result.workflow)
+		return
+	}
+	if result.kind == resultCommit {
+		m.applyCommit(result)
+		return
+	}
 	if result.err != nil {
 		if result.kind == resultOpen && m.repo == nil {
 			m.log.Loading = false
@@ -371,7 +421,31 @@ func (m *Model) applyResult(result *loadResult) {
 	}
 }
 
+func (m *Model) applyCommit(result *loadResult) {
+	m.commit.Busy = false
+	m.commit.SetChanges(result.changes)
+	if result.message != "" {
+		m.commit.SetLastMessage(result.message)
+	}
+	if result.err != nil {
+		m.commit.Error = commitview.UserMessage(result.err)
+		m.commit.ShowToast("Commit failed", m.commit.Error, ui.ToastError)
+		return
+	}
+	if result.committed {
+		m.commit.ClearMessage()
+		m.commit.ShowToast("Committed", result.toast, ui.ToastSuccess)
+		if result.pushAfter && m.OnPush != nil {
+			m.OnPush()
+		}
+		m.refreshLog()
+	} else if result.toast != "" {
+		m.commit.ShowToast("Changes", result.toast, ui.ToastSuccess)
+	}
+}
+
 func (m *Model) returnToPicker() {
+	m.resetTools()
 	m.cancelCurrent()
 	m.nextGeneration()
 	m.repo = nil
