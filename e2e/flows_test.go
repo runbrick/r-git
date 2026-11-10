@@ -228,7 +228,7 @@ func TestStashAndPopAroundCheckout(t *testing.T) {
 	a.waitFor(main + " (current)")
 
 	a.click("Open stash")
-	a.waitFor("stash@")
+	a.waitFor("Pop")
 	a.clickLowest("Pop")
 	a.waitFor("Pop now")
 	a.clickLowest("Pop now")
