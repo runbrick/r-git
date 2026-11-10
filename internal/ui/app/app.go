@@ -147,6 +147,7 @@ func (m *Model) Page(c ui.C) {
 	theme := c.Theme()
 	if m.repo == nil && m.initial != "" && !m.startQueued {
 		m.startQueued = true
+		fmt.Fprintf(os.Stderr, "e2e-start %s\n", m.initial)
 		m.startOpen(m.initial)
 	}
 	ui.Column(c).Fill().Background(theme.Background).Children(func() {
@@ -424,6 +425,7 @@ func (m *Model) applyResult(result *loadResult) {
 	}
 	switch result.kind {
 	case resultOpen:
+		fmt.Fprintf(os.Stderr, "e2e-apply commits=%d\n", len(result.commits))
 		m.repo = result.repo
 		m.repoConfig, _ = config.LoadRepo(m.configDir, result.repo.Path)
 		m.pathEntry = result.repo.Path
