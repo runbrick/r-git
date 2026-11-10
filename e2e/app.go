@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const replyTimeout = 25 * time.Second
+const replyTimeout = 60 * time.Second
 
 // app is one headless r-git process and the line protocol on its pipes.
 type app struct {
@@ -368,9 +368,11 @@ func (a *app) key(spec string) {
 }
 
 // waitFor blocks in the app until the painted texts contain needle.
+// Opening a repository reads git before the first paint of the log, and
+// that read takes longer than five seconds on a cold CI runner.
 func (a *app) waitFor(needle string) {
 	a.t.Helper()
-	a.command("waitfor " + quote(needle) + " 15000")
+	a.command("waitfor " + quote(needle) + " 45000")
 }
 
 // texts returns every painted text line, optionally filtered.
