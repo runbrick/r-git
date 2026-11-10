@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/runbrick/r-git/internal/git/ops"
 	"github.com/runbrick/r-git/internal/testutil"
@@ -206,22 +207,23 @@ func TestCredentialsDialogBlocksProvider(t *testing.T) {
 	}
 }
 
+type credentialResult struct {
+	cred ops.Credential
+	err  error
+}
+
 func TestCredentialsQueueAnswersInOrder(t *testing.T) {
 	m, driver := openDriver(t, "")
 	m.branches.Credentials.SetInvalidator(&m.invalidator)
-	type result struct {
-		cred ops.Credential
-		err  error
-	}
-	first := make(chan result, 1)
-	second := make(chan result, 1)
+	first := make(chan credentialResult, 1)
+	second := make(chan credentialResult, 1)
 	go func() {
 		cred, err := m.branches.Credentials.Credentials(context.Background(), ops.CredentialRequest{
 			Prompt: "Username for 'https://one.example'",
 			URL:    "https://one.example",
 			Kind:   ops.CredentialKindUsername,
 		})
-		first <- result{cred, err}
+		first <- credentialResult{cred, err}
 	}()
 	waitFor(t, driver, func() bool { return hasLabel(driver, "https://one.example") })
 	go func() {
@@ -230,7 +232,7 @@ func TestCredentialsQueueAnswersInOrder(t *testing.T) {
 			URL:    "https://two.example",
 			Kind:   ops.CredentialKindUsername,
 		})
-		second <- result{cred, err}
+		second <- credentialResult{cred, err}
 	}()
 	waitFor(t, driver, func() bool { return m.branches.Credentials.PendingCount() == 2 })
 	clickControl(t, driver, "Username")
@@ -266,13 +268,9 @@ func TestCredentialsQueueAnswersInOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	clickControl(t, driver, "OK")
-	select {
-	case got := <-second:
-		if got.err != nil || got.cred.Username != "two" || got.cred.Password != "secret-two" {
-			t.Fatalf("second = %+v", got)
-		}
-	default:
-		t.Fatal("second prompt was not answered")
+	got := waitCredential(t, second)
+	if got.err != nil || got.cred.Username != "two" || got.cred.Password != "secret-two" {
+		t.Fatalf("second = %+v", got)
 	}
 }
 
@@ -337,9 +335,20 @@ func TestCredentialsCancelClosesAndShowsNext(t *testing.T) {
 		if cred.Username != "next" || cred.Password != "fresh" {
 			t.Fatalf("next = %+v", cred)
 		}
-	default:
+	case <-time.After(5 * time.Second):
 		t.Fatal("next prompt was not answered")
 	}
+}
+
+func waitCredential(t *testing.T, ch <-chan credentialResult) credentialResult {
+	t.Helper()
+	select {
+	case got := <-ch:
+		return got
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for a credential answer")
+	}
+	return credentialResult{}
 }
 
 func chooseBranch(t *testing.T, driver *viva.Driver, label string) {
