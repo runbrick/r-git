@@ -341,6 +341,27 @@ func field(line, key string) string {
 	return rest[:end]
 }
 
+// quotedField reads key"value" from a tree line.
+func quotedField(line, key string) string {
+	start := strings.Index(line, key+"\"")
+	if start < 0 {
+		return ""
+	}
+	rest := line[start+len(key):]
+	value, err := strconv.Unquote(rest)
+	if err != nil {
+		end := strings.LastIndex(rest, "\"")
+		if end < 1 {
+			return ""
+		}
+		value, err = strconv.Unquote(rest[:end+1])
+		if err != nil {
+			return ""
+		}
+	}
+	return value
+}
+
 // numberField reads a "key=number" token. A bare key search would match the
 // key inside another token, such as w= inside id=.
 func numberField(line, key string) float64 {
@@ -369,7 +390,9 @@ func (a *app) key(spec string) {
 
 // waitFor blocks in the app until the painted texts contain needle.
 // Opening a repository reads git before the first paint of the log, and
-// that read takes longer than five seconds on a cold CI runner.
+// that read takes longer than five seconds on a cold CI runner. The match is
+// a substring, so a needle that is part of a label already on screen returns
+// immediately.
 func (a *app) waitFor(needle string) {
 	a.t.Helper()
 	a.command("waitfor " + quote(needle) + " 45000")
@@ -410,6 +433,30 @@ func unquoteText(line string) string {
 		return line
 	}
 	return value
+}
+
+// clickWhenEnabled clicks label once the tree shows it enabled. The click uses
+// that control's id, because a label click can land on a disabled copy.
+func (a *app) clickWhenEnabled(label string) {
+	a.t.Helper()
+	deadline := time.Now().Add(45 * time.Second)
+	var last []string
+	for time.Now().Before(deadline) {
+		last = a.safeTree()
+		for _, line := range last {
+			if quotedField(line, "label=") != label || strings.Contains(field(line, "state="), "disabled") {
+				continue
+			}
+			id := field(line, "id=")
+			if id == "" {
+				continue
+			}
+			a.clickAt(id)
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	a.t.Fatalf("wait for control %q: not enabled within 45s\n%s", label, strings.Join(last, "\n"))
 }
 
 func quote(value string) string {

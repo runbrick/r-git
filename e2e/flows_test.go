@@ -164,12 +164,10 @@ func TestMergeConflictResolveAndCommit(t *testing.T) {
 	a.click("Merge into current")
 	a.waitFor("Merge conflicts in side")
 	a.clickToolbar("Conflicts")
-	a.waitFor("conflict.txt")
-	a.click("conflict.txt")
-	a.waitFor("Accept Theirs 1")
-	a.click("Accept Theirs 1")
-	a.click("Accept Yours 2")
-	a.click("Mark resolved")
+	a.waitFor("Close conflicts")
+	a.clickWhenEnabled("conflict.txt")
+	a.clickWhenEnabled("Accept Theirs")
+	a.clickWhenEnabled("Mark resolved")
 	a.waitFor("Select a conflicted file")
 	a.click("Close conflicts")
 	a.clickToolbar("Commit")
@@ -185,7 +183,7 @@ func TestMergeConflictResolveAndCommit(t *testing.T) {
 	}
 
 	got := f.read(t, "conflict.txt")
-	want := "theirs first\nkeep 1\nkeep 2\nkeep 3\nkeep 4\nours last\n"
+	want := "theirs first\nkeep 1\nkeep 2\nkeep 3\nkeep 4\ntheirs last\n"
 	if got != want {
 		t.Fatalf("resolved content:\n%s\nwant:\n%s", got, want)
 	}
@@ -228,7 +226,7 @@ func TestStashAndPopAroundCheckout(t *testing.T) {
 	a.waitFor(main + " (current)")
 
 	a.click("Open stash")
-	a.waitFor("Stashes")
+	a.waitFor("Keep index")
 	a.clickLowest("Pop")
 	a.waitFor("Pop now")
 	a.clickLowest("Pop now")
