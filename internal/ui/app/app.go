@@ -14,6 +14,7 @@ import (
 	commitview "github.com/runbrick/r-git/internal/ui/commit"
 	logview "github.com/runbrick/r-git/internal/ui/log"
 	viva "github.com/vivaui/viva/app"
+	"github.com/vivaui/viva/gfx"
 	"github.com/vivaui/viva/ui"
 )
 
@@ -123,11 +124,12 @@ func Run(configDir, initialPath string) error {
 	if err != nil {
 		return err
 	}
-	return ui.Run(viva.Config{Title: "r-git", Width: 1400, Height: 900,
-		Invalidator: &m.invalidator,
-		OnWake:      m.applyPending,
-		OnClosed:    func() { m.stopWorkers() },
-	}, m.Page)
+	page := ui.NewPage(ui.PageConfig{View: m.Page, Invalidator: &m.invalidator})
+	var canvas gfx.Canvas
+	return viva.RunCanvas(page.Config(viva.Config{Title: "r-git", Width: 1400, Height: 900,
+		OnWake:   m.applyPending,
+		OnClosed: func() { m.stopWorkers() },
+	}), &canvas)
 }
 
 func (m *Model) config() viva.Config {
