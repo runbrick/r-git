@@ -123,12 +123,16 @@ func Run(configDir, initialPath string) error {
 	if err != nil {
 		return err
 	}
-	return viva.Run(m.config())
+	return ui.Run(viva.Config{Title: "r-git", Width: 1400, Height: 900,
+		Invalidator: &m.invalidator,
+		OnWake:      m.applyPending,
+		OnClosed:    func() { m.stopWorkers() },
+	}, m.Page)
 }
 
 func (m *Model) config() viva.Config {
 	page := ui.NewPage(ui.PageConfig{View: m.Page, Invalidator: &m.invalidator})
-	return page.Config(viva.Config{Title: "r-git", Width: 1120, Height: 760,
+	return page.Config(viva.Config{Title: "r-git", Width: 1400, Height: 900,
 		OnWake:   m.applyPending,
 		OnClosed: func() { m.stopWorkers() },
 	})

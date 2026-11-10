@@ -442,8 +442,12 @@ func (s *Session) applyRemotes(ctx context.Context, changes []RemoteChange, refr
 
 func (s *Session) runMerge(ref string, start func(func(context.Context)), refresh func()) {
 	start(func(ctx context.Context) {
-		_, err := s.runner.Run(ctx, command.Cmd{Dir: s.repo.Path, Subcommand: "merge", Args: []string{ref}, Write: true})
-		s.finish(err, "Merged "+ref)
+		result := ops.Operations{Dir: s.repo.Path, Git: s.runner}.Merge(ctx, ref, ops.MergeOptions{})
+		if result.Outcome == ops.OutcomeConflicts {
+			s.emit(UIEvent{Error: "Merge conflicts in " + ref, Refresh: true})
+			return
+		}
+		s.finish(result.Err, "Merged "+ref)
 	})
 }
 

@@ -96,20 +96,20 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 			if p.Error != "" {
 				ui.Text(c, p.Error).Color(c.Theme().Danger).FontSize(12)
 			}
+			if ui.Button(c, "Save stash").Clicked() {
+				pending = StashRequest{
+					Action: StashCreate,
+					Options: ops.StashSaveOptions{
+						Message:          strings.TrimSpace(p.Message),
+						IncludeUntracked: p.IncludeUntracked,
+						KeepIndex:        p.KeepIndex,
+					},
+				}
+			}
 		})
 	}, func() {
 		if ui.Button(c, "Close").Clicked() {
 			p.Open = false
-		}
-		if ui.Button(c, "Save stash").Clicked() {
-			pending = StashRequest{
-				Action: StashCreate,
-				Options: ops.StashSaveOptions{
-					Message:          strings.TrimSpace(p.Message),
-					IncludeUntracked: p.IncludeUntracked,
-					KeepIndex:        p.KeepIndex,
-				},
-			}
 		}
 		if len(p.Entries) == 0 {
 			return
@@ -154,13 +154,13 @@ func (p *StashPanel) confirm(c ui.C, pending *StashRequest) {
 		ref := p.selectedRef()
 		ui.Modal(c, &p.confirmPop, "Pop stash", func() {
 			ui.Text(c, "Pop "+ref+"? The stash is removed if the apply succeeds.")
+			if ui.Button(c, "Pop now").Clicked() {
+				p.confirmPop = false
+				*pending = StashRequest{Action: StashPop, Ref: ref}
+			}
 		}, func() {
 			if ui.Button(c, "Cancel").Clicked() {
 				p.confirmPop = false
-			}
-			if ui.Button(c, "Pop").Clicked() {
-				p.confirmPop = false
-				*pending = StashRequest{Action: StashPop, Ref: ref}
 			}
 		})
 	}

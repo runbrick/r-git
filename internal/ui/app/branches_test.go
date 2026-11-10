@@ -132,8 +132,8 @@ func TestStashAndPop(t *testing.T) {
 		return false
 	})
 	clickControl(t, driver, "Pop")
-	waitFor(t, driver, func() bool { return m.branches.Stash.Open == false || hasLabel(driver, "Pop stash") })
-	clickControl(t, driver, "Pop")
+	waitFor(t, driver, func() bool { return hasLabel(driver, "Pop now") })
+	clickControl(t, driver, "Pop now")
 	waitFor(t, driver, func() bool {
 		body, err := os.ReadFile(filepath.Join(g.Dir, "base.txt"))
 		if err == nil && string(body) == "wip\n" {

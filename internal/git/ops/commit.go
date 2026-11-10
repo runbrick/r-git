@@ -36,7 +36,6 @@ func (s *Service) Commit(ctx context.Context, opts CommitOptions) (model.Hash, e
 	if err != nil {
 		return model.Hash{}, err
 	}
-	defer removeFile(msgPath)
 
 	args := append([]string{}, msgArgs...)
 	if opts.Amend {
@@ -59,6 +58,7 @@ func (s *Service) Commit(ctx context.Context, opts CommitOptions) (model.Hash, e
 		cmd.Config = []string{"core.hooksPath=" + hooks}
 	}
 	res, err := s.Git.Run(ctx, cmd)
+	removeFile(msgPath)
 	if err != nil {
 		return model.Hash{}, classify(res, err, command.Checkout)
 	}

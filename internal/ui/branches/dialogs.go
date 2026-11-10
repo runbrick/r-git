@@ -298,7 +298,12 @@ func (d *PushDialog) form(c ui.C) {
 	for i := range d.Targets {
 		target := &d.Targets[i]
 		ui.Column(c.Key(target.Branch)).Gap(4).FillWidth().Children(func() {
-			ui.Checkbox(c, &target.Selected, target.Branch)
+			box := ui.Checkbox(c, &d.Targets[i].Selected, d.Targets[i].Branch)
+			// The click settles into the bool after this function returns, and a
+			// range variable's address is not that bool. Read the click here.
+			if box.Clicked() {
+				d.Targets[i].Selected = !d.Targets[i].Selected
+			}
 			ui.Row(c).Gap(8).Children(func() {
 				ui.TextField(c, &target.Remote, "Remote", "origin").Grow(1)
 				ui.TextField(c, &target.Target, "Target branch", target.Branch).Grow(1)
