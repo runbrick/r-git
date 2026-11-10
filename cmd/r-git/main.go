@@ -15,28 +15,12 @@ import (
 	"os"
 
 	"github.com/runbrick/r-git/internal/config"
-	"github.com/vivaui/viva/app"
-	"github.com/vivaui/viva/ui"
+	uiapp "github.com/runbrick/r-git/internal/ui/app"
 )
 
 // version is stamped by the linker with -X main.version=...
 // A source build reports "devel".
 var version = "devel"
-
-type model struct {
-	opts   StartOptions
-	app    config.AppSettings
-	repo   config.RepoSettings
-	config string
-}
-
-func (m *model) page(c ui.C) {
-	ui.Column(c).Fill().Pad(24).Children(func() {
-		// TODO: honor AppSettings.ShowLogInEditor when the log view lands.
-		// The empty state from PR0 stays until that screen replaces it.
-		ui.Button(c, "Open a repository")
-	})
-}
 
 func main() {
 	opts, err := ParseArgs(os.Args[1:])
@@ -66,26 +50,7 @@ func run(opts StartOptions) error {
 			return err
 		}
 	}
-	appSettings, err := config.LoadApp(dir)
-	if err != nil {
-		return err
-	}
-	var repoSettings config.RepoSettings
-	if opts.RepoPath != "" {
-		repoSettings, err = config.LoadRepo(dir, opts.RepoPath)
-		if err != nil {
-			return err
-		}
-	} else {
-		repoSettings = config.DefaultRepoSettings()
-	}
-	m := &model{
-		opts:   opts,
-		app:    appSettings,
-		repo:   repoSettings,
-		config: dir,
-	}
-	return ui.Run(app.Config{Title: "r-git"}, m.page)
+	return uiapp.Run(dir, opts.RepoPath)
 }
 
 // errHelp is returned by ParseArgs for -h and --help.
