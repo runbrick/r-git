@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -92,6 +90,13 @@ type Model struct {
 	closed      bool
 	tools       tools
 	gitCancels  []context.CancelFunc
+	// openEffect loads the initial repository. Its goroutine starts during the
+	// first paint and invalidates the page's own pointer when it finishes, which
+	// is the pointer the headless driver binds after that paint returns.
+	// openEffect is declared on each paint so it records the invalidator the
+	// page is using. A finished git publish wakes that pointer as well as the
+	// model's: the headless driver binds the page's after the first paint.
+	openEffect *ui.EffectState[loadResult, string]
 }
 
 // New loads settings. Repository I/O starts after the window's first paint.
@@ -108,6 +113,9 @@ func New(configDir, initialPath string) (*Model, error) {
 	m.log.OnPage = m.loadPage
 	m.log.OnSelect = m.loadDetails
 	m.initTools()
+	m.openEffect = ui.NewEffect[loadResult, string](func(context.Context) (loadResult, error) {
+		return loadResult{}, nil
+	})
 	m.commit.OnRequest = m.handleCommitRequest
 	m.commit.OnShowDiff = func(hash model.Hash, path string) {
 		if m.OnShowDiff != nil {
@@ -147,9 +155,9 @@ func (m *Model) Page(c ui.C) {
 	theme := c.Theme()
 	if m.repo == nil && m.initial != "" && !m.startQueued {
 		m.startQueued = true
-		fmt.Fprintf(os.Stderr, "e2e-start %s\n", m.initial)
-		m.startOpen(m.initial)
+		m.prepareOpen(m.initial)
 	}
+	m.takeOpen(c)
 	ui.Column(c).Fill().Background(theme.Background).Children(func() {
 		m.toolbar(c)
 		if m.repo == nil {
@@ -254,6 +262,13 @@ func (m *Model) startPage(c ui.C) {
 }
 
 func (m *Model) startOpen(path string) {
+	m.prepareOpen(path)
+}
+
+// prepareOpen records the repository the next paint should load. The effect is
+// declared from Page, so its first run starts during that paint and wakes the
+// invalidator the page bound.
+func (m *Model) prepareOpen(path string) {
 	m.resetTools()
 	path = filepath.Clean(path)
 	previous := m.cancel
@@ -267,31 +282,44 @@ func (m *Model) startOpen(path string) {
 	m.workers.Add(1)
 	go func() {
 		defer m.workers.Done()
-		out := loadResult{kind: resultOpen, generation: generation, path: path}
-		runner, err := command.New()
-		if err == nil {
-			out.repo, err = repo.OpenWithExecutor(ctx, path, runner)
-		}
-		if err == nil {
-			out.ordered, err = out.repo.ParentsOrderedAll(ctx)
-		}
-		if err == nil {
-			out.graph, out.graphIndex, err = logview.NewGraphRows(out.ordered)
-		}
-		if err == nil {
-			out.commits, err = out.repo.Log(ctx, repo.LogQuery{MaxCount: pageSize, All: true})
-		}
-		if err == nil {
-			out.done = len(out.commits) < pageSize
-		}
-		out.err = err
-		if err == nil {
-			out.snap, err = out.repo.Snapshot(ctx)
-			out.err = err
-		}
-		fmt.Fprintf(os.Stderr, "e2e-open err=%v commits=%d\n", out.err, len(out.commits))
+		out := m.loadOpen(ctx, path, generation)
 		m.publish(&out)
 	}()
+}
+
+// takeOpen declares the open effect. The declaration copies the invalidator
+// the page is using into the effect, which publish wakes.
+func (m *Model) takeOpen(c ui.C) {
+	if m.openEffect == nil {
+		return
+	}
+	ui.Effect(c, m.openEffect, "bound")
+}
+
+func (m *Model) loadOpen(ctx context.Context, path string, generation uint64) loadResult {
+	out := loadResult{kind: resultOpen, generation: generation, path: path}
+	runner, err := command.New()
+	if err == nil {
+		out.repo, err = repo.OpenWithExecutor(ctx, path, runner)
+	}
+	if err == nil {
+		out.ordered, err = out.repo.ParentsOrderedAll(ctx)
+	}
+	if err == nil {
+		out.graph, out.graphIndex, err = logview.NewGraphRows(out.ordered)
+	}
+	if err == nil {
+		out.commits, err = out.repo.Log(ctx, repo.LogQuery{MaxCount: pageSize, All: true})
+	}
+	if err == nil {
+		out.done = len(out.commits) < pageSize
+	}
+	out.err = err
+	if err == nil {
+		out.snap, err = out.repo.Snapshot(ctx)
+		out.err = err
+	}
+	return out
 }
 
 func (m *Model) loadPage(branch string, skip int) {
@@ -380,15 +408,16 @@ func (m *Model) publish(result *loadResult) {
 		m.pending = append(m.pending, result)
 	}
 	m.mu.Unlock()
-	fmt.Fprintf(os.Stderr, "e2e-publish kind=%d accepted=%v\n", result.kind, accepted)
 	if accepted {
 		m.invalidator.Invalidate()
+		if extra := effectInvalidator(m.openEffect); extra != nil && extra != &m.invalidator {
+			extra.Invalidate()
+		}
 	}
 }
 
 // applyPending runs only on Viva's window thread, before the repaint it wakes.
 func (m *Model) applyPending() {
-	fmt.Fprintf(os.Stderr, "e2e-wake\n")
 	m.mu.Lock()
 	results := m.pending
 	m.pending = nil
@@ -425,7 +454,6 @@ func (m *Model) applyResult(result *loadResult) {
 	}
 	switch result.kind {
 	case resultOpen:
-		fmt.Fprintf(os.Stderr, "e2e-apply commits=%d\n", len(result.commits))
 		m.repo = result.repo
 		m.repoConfig, _ = config.LoadRepo(m.configDir, result.repo.Path)
 		m.pathEntry = result.repo.Path
