@@ -61,9 +61,13 @@ func (o Operations) InteractiveRebase(ctx context.Context, onto string, edit fun
 	if err := ctx.Err(); err != nil {
 		return RebaseResult{Outcome: OutcomeError, Err: err}
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return RebaseResult{Outcome: OutcomeError, Err: opError("locate r-git editor", err)}
+	executable := o.Editor
+	if executable == "" {
+		var err error
+		executable, err = os.Executable()
+		if err != nil {
+			return RebaseResult{Outcome: OutcomeError, Err: opError("locate r-git editor", err)}
+		}
 	}
 	tempDir, err := os.MkdirTemp("", "r-git-rebase-editor-*")
 	if err != nil {

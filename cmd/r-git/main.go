@@ -27,6 +27,9 @@ func main() {
 	if ops.HandleAskpass() {
 		return
 	}
+	if handled, exitCode := ops.RunEditorIfRequested(); handled {
+		os.Exit(exitCode)
+	}
 	opts, err := ParseArgs(os.Args[1:])
 	if err != nil {
 		if errors.Is(err, errHelp) {

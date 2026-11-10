@@ -12,8 +12,9 @@ import (
 var ErrInvalidTodo = errors.New("invalid rebase todo")
 
 type Operations struct {
-	Dir string
-	Git command.Executor
+	Dir    string
+	Git    command.Executor
+	Editor string
 }
 
 func (o Operations) run(ctx context.Context, subcommand string, args ...string) (command.Result, error) {
