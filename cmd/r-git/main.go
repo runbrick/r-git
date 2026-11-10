@@ -24,8 +24,8 @@ import (
 var version = "devel"
 
 func main() {
-	if handled, exitCode := ops.RunEditorIfRequested(); handled {
-		os.Exit(exitCode)
+	if ops.HandleAskpass() {
+		return
 	}
 	opts, err := ParseArgs(os.Args[1:])
 	if err != nil {
