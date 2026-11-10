@@ -90,13 +90,9 @@ type Model struct {
 	closed      bool
 	tools       tools
 	gitCancels  []context.CancelFunc
-	// openEffect loads the initial repository. Its goroutine starts during the
-	// first paint and invalidates the page's own pointer when it finishes, which
-	// is the pointer the headless driver binds after that paint returns.
-	// openEffect is declared on each paint so it records the invalidator the
-	// page is using. A finished git publish wakes that pointer as well as the
-	// model's: the headless driver binds the page's after the first paint.
-	openEffect *ui.EffectState[loadResult, string]
+	// seenFrame is closed when the first Page call returns. The headless driver
+	// binds the invalidator after that return, so the first open waits for it.
+	seenFrame chan struct{}
 }
 
 // New loads settings. Repository I/O starts after the window's first paint.
@@ -105,7 +101,7 @@ func New(configDir, initialPath string) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{configDir: configDir, appConfig: settings, initial: initialPath, pathEntry: initialPath}
+	m := &Model{configDir: configDir, appConfig: settings, initial: initialPath, pathEntry: initialPath, seenFrame: make(chan struct{})}
 	m.log.Branch = "All branches"
 	m.log.Choices = []string{"All branches"}
 	m.log.Done = initialPath == ""
@@ -113,9 +109,6 @@ func New(configDir, initialPath string) (*Model, error) {
 	m.log.OnPage = m.loadPage
 	m.log.OnSelect = m.loadDetails
 	m.initTools()
-	m.openEffect = ui.NewEffect[loadResult, string](func(context.Context) (loadResult, error) {
-		return loadResult{}, nil
-	})
 	m.commit.OnRequest = m.handleCommitRequest
 	m.commit.OnShowDiff = func(hash model.Hash, path string) {
 		if m.OnShowDiff != nil {
@@ -155,9 +148,8 @@ func (m *Model) Page(c ui.C) {
 	theme := c.Theme()
 	if m.repo == nil && m.initial != "" && !m.startQueued {
 		m.startQueued = true
-		m.prepareOpen(m.initial)
+		m.startOpen(m.initial)
 	}
-	m.takeOpen(c)
 	ui.Column(c).Fill().Background(theme.Background).Children(func() {
 		m.toolbar(c)
 		if m.repo == nil {
@@ -180,6 +172,17 @@ func (m *Model) Page(c ui.C) {
 		c.After(func() { m.branches.AfterPaint(m.startGit, m.refresh) })
 	})
 	m.tools.rebase.Page(c)
+	m.noteFrame()
+}
+
+// noteFrame lets an open that the first paint armed start. The driver binds
+// the invalidator after this call returns.
+func (m *Model) noteFrame() {
+	select {
+	case <-m.seenFrame:
+	default:
+		close(m.seenFrame)
+	}
 }
 
 func (m *Model) toolbar(c ui.C) {
@@ -265,9 +268,8 @@ func (m *Model) startOpen(path string) {
 	m.prepareOpen(path)
 }
 
-// prepareOpen records the repository the next paint should load. The effect is
-// declared from Page, so its first run starts during that paint and wakes the
-// invalidator the page bound.
+// prepareOpen loads path. The first call waits until the first paint returns,
+// which is when the driver binds the invalidator.
 func (m *Model) prepareOpen(path string) {
 	m.resetTools()
 	path = filepath.Clean(path)
@@ -282,18 +284,14 @@ func (m *Model) prepareOpen(path string) {
 	m.workers.Add(1)
 	go func() {
 		defer m.workers.Done()
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.seenFrame:
+		}
 		out := m.loadOpen(ctx, path, generation)
 		m.publish(&out)
 	}()
-}
-
-// takeOpen declares the open effect. The declaration copies the invalidator
-// the page is using into the effect, which publish wakes.
-func (m *Model) takeOpen(c ui.C) {
-	if m.openEffect == nil {
-		return
-	}
-	ui.Effect(c, m.openEffect, "bound")
 }
 
 func (m *Model) loadOpen(ctx context.Context, path string, generation uint64) loadResult {
@@ -410,9 +408,6 @@ func (m *Model) publish(result *loadResult) {
 	m.mu.Unlock()
 	if accepted {
 		m.invalidator.Invalidate()
-		if extra := effectInvalidator(m.openEffect); extra != nil && extra != &m.invalidator {
-			extra.Invalidate()
-		}
 	}
 }
 
