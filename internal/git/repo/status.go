@@ -55,9 +55,9 @@ func ParseStatusV2(data []byte) (StatusResult, error) {
 		fields := strings.SplitN(item, " ", fieldCount)
 		switch item[0] {
 		case '?':
-			result.Changes = append(result.Changes, model.FileChange{Status: model.StatusUntracked, Path: item[2:]})
+			result.Changes = append(result.Changes, model.FileChange{Status: model.StatusUntracked, Path: item[2:], Worktree: '?'})
 		case '!':
-			result.Changes = append(result.Changes, model.FileChange{Status: model.StatusIgnored, Path: item[2:]})
+			result.Changes = append(result.Changes, model.FileChange{Status: model.StatusIgnored, Path: item[2:], Worktree: '!'})
 		case '1':
 			if len(fields) < 9 {
 				return result, fmt.Errorf("malformed porcelain v2 ordinary record %q", item)
@@ -66,7 +66,11 @@ func ParseStatusV2(data []byte) (StatusResult, error) {
 			if err != nil {
 				return result, err
 			}
-			result.Changes = append(result.Changes, model.FileChange{Status: status, Path: fields[8]})
+			change := model.FileChange{Status: status, Path: fields[8]}
+			if len(fields[1]) >= 2 {
+				change.Index, change.Worktree = fields[1][0], fields[1][1]
+			}
+			result.Changes = append(result.Changes, change)
 		case '2':
 			if len(fields) < 10 {
 				return result, fmt.Errorf("malformed porcelain v2 rename record %q", item)
@@ -82,12 +86,16 @@ func ParseStatusV2(data []byte) (StatusResult, error) {
 				return result, fmt.Errorf("rename record missing origin path")
 			}
 			i++
-			result.Changes = append(result.Changes, model.FileChange{Status: status, Path: fields[9], OrigPath: items[i]})
+			change := model.FileChange{Status: status, Path: fields[9], OrigPath: items[i]}
+			if len(fields[1]) >= 2 {
+				change.Index, change.Worktree = fields[1][0], fields[1][1]
+			}
+			result.Changes = append(result.Changes, change)
 		case 'u':
 			if len(fields) < 11 {
 				return result, fmt.Errorf("malformed porcelain v2 unmerged record %q", item)
 			}
-			result.Changes = append(result.Changes, model.FileChange{Status: model.StatusUnmerged, Path: fields[10]})
+			result.Changes = append(result.Changes, model.FileChange{Status: model.StatusUnmerged, Path: fields[10], Index: 'U', Worktree: 'U'})
 		default:
 			return result, fmt.Errorf("unknown porcelain v2 record %q", item)
 		}

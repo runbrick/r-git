@@ -12,7 +12,6 @@ import (
 	"github.com/runbrick/r-git/internal/testutil"
 	viva "github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/gfx"
-	"github.com/vivaui/viva/ui"
 )
 
 func TestOpenRepositoryShowsLogAndDetails(t *testing.T) {
@@ -235,8 +234,7 @@ func openDriver(t *testing.T, path string) (*Model, *viva.Driver) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := ui.NewPage(ui.PageConfig{View: m.Page})
-	driver, err := viva.NewDriver(page.Config(m.config()), nil)
+	driver, err := viva.NewDriver(m.config(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
