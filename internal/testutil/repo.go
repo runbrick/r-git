@@ -55,14 +55,27 @@ func NewRepo(t *testing.T) *Repo {
 }
 
 func (r *Repo) Git(args ...string) string {
+	out, err := r.run(args...)
+	if err != nil {
+		r.t.Fatalf("git %s failed: %v\n%s", argsString(args), err, out)
+	}
+	return out
+}
+
+// GitAllowError runs git and returns its combined output even when it
+// exits non-zero. A failure to start the process still fails the test.
+func (r *Repo) GitAllowError(args ...string) (string, error) {
+	r.t.Helper()
+	return r.run(args...)
+}
+
+func (r *Repo) run(args ...string) (string, error) {
+	r.t.Helper()
 	cmd := exec.Command(r.command, args...)
 	cmd.Dir = r.Dir
 	cmd.Env = append(os.Environ(), "HOME="+r.home, "USERPROFILE="+r.home, "GIT_CONFIG_GLOBAL="+r.globalConfig, "GIT_CONFIG_SYSTEM="+r.systemConfig)
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		r.t.Fatalf("git %s failed: %v\n%s", argsString(args), err, output)
-	}
-	return string(output)
+	return string(output), err
 }
 
 func (r *Repo) WriteFile(path, content string) {
