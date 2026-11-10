@@ -93,7 +93,7 @@ func (v *View) Page(c ui.C) {
 					})
 					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() { ui.Text(c, v.Content.RightLabel).Bold(); v.right.Content(c, "Theirs content") })
 				})
-				ui.Scroll(c).FillWidth().Height(160).Gap(4).Children(func() {
+				ui.Scroll(c).FillWidth().MaxHeight(160).Gap(4).Children(func() {
 					for i, chunk := range v.Merge.Chunks {
 						index := i
 						ui.Row(c.KeyInt(i)).FillWidth().Gap(8).Items(ui.Center).Children(func() {

@@ -30,6 +30,8 @@ type app struct {
 	stderr *bytes.Buffer
 	repo   string
 	home   string
+	width  float64
+	height float64
 }
 
 func startApp(t *testing.T, repo, home, configDir string) *app {
@@ -84,7 +86,7 @@ func startApp(t *testing.T, repo, home, configDir string) *app {
 	})
 	// Run prints "ok ready WxH" before it reads a command. Drain it so the
 	// first real command is not answered by that greeting.
-	if _, err := a.readReply(); err != nil {
+	if _, _, err := a.readReply(); err != nil {
 		t.Fatalf("headless protocol did not start: %v\nstderr:\n%s", err, stderr.String())
 	}
 	if _, err := a.roundTrip("resize 1600 1000"); err != nil {
@@ -170,36 +172,57 @@ func (a *app) roundTrip(line string) ([]string, error) {
 	if _, err := io.WriteString(a.stdin, line+"\n"); err != nil {
 		return nil, err
 	}
-	return a.readReply()
+	data, status, err := a.readReply()
+	if err != nil {
+		return data, err
+	}
+	if w, h, ok := parseSize([]string{status}); ok {
+		a.width, a.height = w, h
+	}
+	return data, nil
 }
 
-func (a *app) readReply() ([]string, error) {
+func parseSize(lines []string) (float64, float64, bool) {
+	for _, line := range lines {
+		for _, token := range strings.Fields(line) {
+			width, height, ok := strings.Cut(token, "x")
+			if !ok || strings.Contains(width, "=") {
+				continue
+			}
+			w, werr := strconv.ParseFloat(width, 64)
+			h, herr := strconv.ParseFloat(height, 64)
+			if werr == nil && herr == nil && w > 0 && h > 0 {
+				return w, h, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+func (a *app) readReply() ([]string, string, error) {
 	deadline := time.Now().Add(replyTimeout)
 	var data []string
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return data, fmt.Errorf("timed out waiting for ok")
+			return data, "", fmt.Errorf("timed out waiting for ok")
 		}
 		select {
 		case got, ok := <-a.lines:
 			if !ok {
-				return data, io.EOF
+				return data, "", io.EOF
 			}
 			if got == "ok" || strings.HasPrefix(got, "ok ") || strings.HasPrefix(got, "error") {
 				if strings.HasPrefix(got, "error") {
-					return data, fmt.Errorf("%s", got)
+					return data, got, fmt.Errorf("%s", got)
 				}
-				if rest := strings.TrimPrefix(got, "ok"); rest != "" {
-					data = append(data, strings.TrimSpace(rest))
-				}
-				return data, nil
+				return data, got, nil
 			}
 			data = append(data, got)
 		case err := <-a.errs:
-			return data, err
+			return data, "", err
 		case <-time.After(remaining):
-			return data, fmt.Errorf("timed out waiting for ok")
+			return data, "", fmt.Errorf("timed out waiting for ok")
 		}
 	}
 }
@@ -464,10 +487,13 @@ func unquoteText(line string) string {
 	return value
 }
 
-// clickWhenEnabled clicks label once the tree shows it enabled. The click uses
-// that control's id, because a label click can land on a disabled copy.
+// clickWhenEnabled clicks label once the tree shows it enabled and fully
+// inside the window. The click uses that control's id, because a label click
+// can land on a disabled copy. A button painted past the window edge answers
+// the tree as enabled and the coordinate click misses it.
 func (a *app) clickWhenEnabled(label string) {
 	a.t.Helper()
+	_, height := a.windowSize()
 	deadline := time.Now().Add(45 * time.Second)
 	var last []string
 	for time.Now().Before(deadline) {
@@ -477,7 +503,9 @@ func (a *app) clickWhenEnabled(label string) {
 				continue
 			}
 			id := field(line, "id=")
-			if id == "" {
+			y := numberField(line, "y=")
+			h := numberField(line, "h=")
+			if id == "" || y < 0 || h <= 0 || y+h > height {
 				continue
 			}
 			a.clickAt(id)
@@ -485,7 +513,21 @@ func (a *app) clickWhenEnabled(label string) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	a.t.Fatalf("wait for control %q: not enabled within 45s\n%s", label, strings.Join(last, "\n"))
+	a.t.Fatalf("wait for control %q inside the %g tall window: not enabled within 45s\n%s", label, height, strings.Join(last, "\n"))
+}
+
+func (a *app) windowSize() (float64, float64) {
+	a.t.Helper()
+	if a.width > 0 && a.height > 0 {
+		return a.width, a.height
+	}
+	if _, err := a.roundTrip("size"); err != nil {
+		a.t.Fatal(err)
+	}
+	if a.width <= 0 || a.height <= 0 {
+		a.t.Fatal("size reply has no window")
+	}
+	return a.width, a.height
 }
 
 func quote(value string) string {
