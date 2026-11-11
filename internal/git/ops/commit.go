@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"strings"
 
 	"github.com/runbrick/r-git/internal/git/command"
 	"github.com/runbrick/r-git/internal/git/model"
@@ -51,9 +52,28 @@ func (s *Service) Commit(ctx context.Context, opts CommitOptions) (model.Hash, e
 		args = append(args, "--only", "--")
 		args = append(args, opts.Paths...)
 	}
-	res, err := s.run(ctx, "commit", args...)
+	cmd := command.Cmd{Dir: s.Root, Subcommand: "commit", Args: args, Write: true}
+	// Git for Windows does not run hooks from core.hooksPath in the repo
+	// config unless the same value is also passed as -c.
+	if hooks := s.configuredHooksPath(ctx); hooks != "" {
+		cmd.Config = []string{"core.hooksPath=" + hooks}
+	}
+	res, err := s.Git.Run(ctx, cmd)
 	if err != nil {
 		return model.Hash{}, classify(res, err, command.Checkout)
 	}
 	return s.head(ctx)
+}
+
+func (s *Service) configuredHooksPath(ctx context.Context) string {
+	res, err := s.Git.Run(ctx, command.Cmd{
+		Dir:        s.Root,
+		Subcommand: "config",
+		Args:       []string{"--get", "core.hooksPath"},
+		ReadOnly:   true,
+	})
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(res.Stdout))
 }

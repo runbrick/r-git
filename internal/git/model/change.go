@@ -123,6 +123,10 @@ func ParseFileStatus(letter string) (FileStatus, error) {
 // and for unmerged entries that Git reports with an origin. It is empty
 // otherwise.
 //
+// Index and Worktree are the porcelain v2 XY letters when the change came
+// from status. '.' means that side is unchanged. History diffs leave both
+// empty. A partially staged file has a non-dot letter on each side.
+//
 // For a rename, Path is the destination and OrigPath is the source. That
 // matches git diff --name-status output order (orig, then new) once the
 // caller has assigned the two columns; it also matches the task's
@@ -132,11 +136,19 @@ type FileChange struct {
 	Status   FileStatus
 	Path     string
 	OrigPath string
+	Index    byte
+	Worktree byte
 }
 
 // Equal compares status and both paths.
 func (c FileChange) Equal(other FileChange) bool {
-	return c.Status == other.Status && c.Path == other.Path && c.OrigPath == other.OrigPath
+	if c.Status != other.Status || c.Path != other.Path || c.OrigPath != other.OrigPath {
+		return false
+	}
+	if (c.Index != 0 || c.Worktree != 0) && (other.Index != 0 || other.Worktree != 0) {
+		return c.Index == other.Index && c.Worktree == other.Worktree
+	}
+	return true
 }
 
 // String formats the change as "<letter> <path>" or "<letter> <orig> -> <path>".

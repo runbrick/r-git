@@ -30,6 +30,7 @@ type View struct {
 	OnPage       func(string, int)
 	OnSelect     func(model.Hash)
 	OnGraphBuilt func()
+	OnShowDiff   func(model.Hash, string)
 
 	list             ui.ListState
 	visible          []int
@@ -268,7 +269,12 @@ func (v *View) detailPane(c ui.C) {
 				if change.OrigPath != "" {
 					label += "  <- " + change.OrigPath
 				}
-				ui.Text(c, label).FontSize(12).Mono()
+				if v.OnShowDiff == nil {
+					ui.Text(c, label).FontSize(12).Mono()
+				} else if ui.Button(c.Key(change.Path), label).Clicked() {
+					hash, path := commit.Hash, change.Path
+					c.After(func() { v.OnShowDiff(hash, path) })
+				}
 			}
 		})
 	})
