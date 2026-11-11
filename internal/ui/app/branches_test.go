@@ -100,14 +100,20 @@ func TestBranchFlowsOnBareRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	clickControl(t, driver, "Create branch")
-	waitFor(t, driver, func() bool { return strings.TrimSpace(g.Git("branch", "--show-current")) == "topic" })
+	waitFor(t, driver, func() bool {
+		return !m.log.Loading && m.repo.CurrentBranch.Name() == "topic" &&
+			hasLabel(driver, "topic (current)") && strings.TrimSpace(g.Git("branch", "--show-current")) == "topic"
+	})
 
 	// Delete an unmerged branch asks for confirmation, then force-deletes.
 	g.WriteFile("topic.txt", "topic\n")
 	g.Commit("topic commit")
 	g.Git("checkout", "-q", mainBranch)
 	m.refresh()
-	waitFor(t, driver, func() bool { return hasLabel(driver, "topic") && strings.Contains(current(g), mainBranch) })
+	waitFor(t, driver, func() bool {
+		return !m.log.Loading && m.repo.CurrentBranch.Name() == mainBranch &&
+			hasLabel(driver, "topic") && strings.Contains(current(g), mainBranch)
+	})
 	chooseBranch(t, driver, "topic")
 	clickLeftmost(t, driver, "Branch actions")
 	clickControl(t, driver, "Delete")
