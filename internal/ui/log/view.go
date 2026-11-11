@@ -43,6 +43,7 @@ type View struct {
 	parentLabel  string
 
 	list             ui.ListState
+	columns          commitColumns
 	visible          []int
 	searchText       []string
 	normalizedFilter string
@@ -183,16 +184,15 @@ func (v *View) Page(c ui.C) {
 						c.After(func() { v.OnBranch(branch) })
 					}
 				})
-				v.list.RowWidth = 900
 				if v.list.Label == nil {
 					v.list.Label = v.rowLabel
 				}
-				ui.Row(c).FillWidth().PadX(12).PadY(4).Gap(12).Background(theme.Card).Children(func() {
-					ui.Text(c, "Graph").Width(44).FontSize(11).Muted()
-					ui.Text(c, "Subject").Grow(1).FontSize(11).Muted()
-					ui.Text(c, "Author").Width(140).FontSize(11).Muted()
-					ui.Text(c, "Date").Width(100).FontSize(11).Muted()
-					ui.Text(c, "Hash").Width(76).FontSize(11).Muted()
+				ui.CustomLayout(c, &v.columns).FillWidth().PadX(12).PadY(4).Background(theme.Card).Children(func() {
+					ui.Text(c, "Graph").FontSize(11).Muted().Ellipsis()
+					ui.Text(c, "Subject").FontSize(11).Muted().Ellipsis()
+					ui.Text(c, "Author").FontSize(11).Muted().Ellipsis()
+					ui.Text(c, "Date").FontSize(11).Muted().Ellipsis()
+					ui.Text(c, "Hash").FontSize(11).Muted().Ellipsis()
 				})
 				ui.List(c, &v.list, len(v.visible), func(row ui.ListRow) {
 					index := v.visible[row.Index]
@@ -201,21 +201,21 @@ func (v *View) Page(c ui.C) {
 					if row.Selected() {
 						bg = theme.Selection
 					}
-					row.Element.FillWidth().Height(26).PadX(12).Gap(12).Items(ui.Center).Background(bg).DrawOver(func(d *ui.DrawContext) {
+					row.Element.FillWidth().Height(26).Background(bg).DrawOver(func(d *ui.DrawContext) {
 						v.drawGraph(d, v.GraphIndex[commit.Hash])
 					}).Children(func() {
-						ui.Slot(row.C).Width(44).Height(24)
-						ui.Column(row.C).Grow(1).Gap(2).Children(func() {
-							ui.Row(row.C).Gap(6).Items(ui.Center).Children(func() {
+						ui.CustomLayout(row.C, &v.columns).Fill().PadX(12).Children(func() {
+							ui.Slot(row.C).Height(24)
+							ui.Row(row.C).Clip().Gap(6).Items(ui.Center).Children(func() {
 								for _, label := range v.Refs[commit.Hash] {
-									ui.Text(row.C, label).FontSize(10).Bold().Color(theme.AccentForeground).Background(theme.Accent).PadX(5).PadY(2).Radius(theme.Metrics.RadiusControl)
+									ui.Text(row.C, label).Shrink(0).FontSize(10).Bold().Color(theme.AccentForeground).Background(theme.Accent).PadX(5).PadY(2).Radius(theme.Metrics.RadiusControl)
 								}
-								ui.Text(row.C, commit.Subject).FontSize(13)
+								ui.Text(row.C, commit.Subject).Grow(1).FontSize(13).Ellipsis()
 							})
+							ui.Text(row.C, commit.Author.Name).FontSize(12).Muted().Ellipsis()
+							ui.Text(row.C, relative(commit.Author.When)).FontSize(12).Muted().Ellipsis()
+							ui.Text(row.C, commit.Hash.Short()).FontSize(11).Muted().Mono().Ellipsis()
 						})
-						ui.Text(row.C, commit.Author.Name).Width(140).FontSize(12).Muted()
-						ui.Text(row.C, relative(commit.Author.When)).Width(100).FontSize(12).Muted()
-						ui.Text(row.C, commit.Hash.Short()).Width(76).FontSize(11).Muted().Mono()
 					})
 				}).Grow(1)
 				if selected := v.list.Selected(); selected >= 0 && selected < len(v.visible) {
