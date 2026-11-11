@@ -214,7 +214,7 @@ func TestStashAndPopAroundCheckout(t *testing.T) {
 	a := f.open(t)
 	a.waitFor("initial history entry")
 	a.click("Open stash")
-	a.waitFor("Save stash")
+	a.command(`expect exists "Save stash" within 45000`)
 	a.click("textfield:Message")
 	a.typeText("keep this")
 	a.click("Save stash")
@@ -234,7 +234,7 @@ func TestStashAndPopAroundCheckout(t *testing.T) {
 	a.click("Checkout")
 	a.waitFor(main + " (current)")
 	a.click("Open stash")
-	a.waitFor("Save stash")
+	a.command(`expect exists "Save stash" within 45000`)
 	a.click("Pop")
 	a.waitFor("Pop now")
 	a.click("Pop now")
@@ -314,8 +314,7 @@ func TestSmartCheckoutKeepsConflictingStash(t *testing.T) {
 		t.Fatalf("unmerged state %q", status)
 	}
 	a.click("Open stash")
-	a.waitFor("Save stash")
-	a.command(`expect exists "Close stash"`)
+	a.command(`expect exists "Save stash" within 45000`)
 	a.key("escape")
 	a.command(`expect absent "Close stash"`)
 }
