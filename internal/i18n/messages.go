@@ -603,13 +603,18 @@ var En = Messages{
 	func(date string) string { return "authored on " + date },                                                 // AuthoredOn
 	func(date string) string { return "committed on " + date },                                                // CommittedOn
 	func(hashes string) string { return "Parents: " + hashes },                                                // ParentCommits
-	func(n int, names string) string { return fmt.Sprintf("In %d branches: %s", n, names) },                   // InBranches
-	func(n int) string { return fmt.Sprintf("Action %d", n) },                                                 // ActionNumber
-	func(n int) string { return fmt.Sprintf("Message %d", n) },                                                // MessageNumber
-	func(n int) string { return fmt.Sprintf("Move up %d", n) },                                                // MoveUp
-	func(n int) string { return fmt.Sprintf("Move down %d", n) },                                              // MoveDown
-	func(n int) string { return fmt.Sprintf("Accept Yours %d", n) },                                           // AcceptYoursNumber
-	func(n int) string { return fmt.Sprintf("Accept Theirs %d", n) },                                          // AcceptTheirsNumber
+	func(n int, names string) string {
+		if n == 1 {
+			return "In 1 branch: " + names
+		}
+		return fmt.Sprintf("In %d branches: %s", n, names)
+	}, // InBranches
+	func(n int) string { return fmt.Sprintf("Action %d", n) },        // ActionNumber
+	func(n int) string { return fmt.Sprintf("Message %d", n) },       // MessageNumber
+	func(n int) string { return fmt.Sprintf("Move up %d", n) },       // MoveUp
+	func(n int) string { return fmt.Sprintf("Move down %d", n) },     // MoveDown
+	func(n int) string { return fmt.Sprintf("Accept Yours %d", n) },  // AcceptYoursNumber
+	func(n int) string { return fmt.Sprintf("Accept Theirs %d", n) }, // AcceptTheirsNumber
 	func(kind string, n, start, end int) string {
 		return fmt.Sprintf("%s %d · base lines %d–%d", kind, n, start, end)
 	}, // ChunkDescription

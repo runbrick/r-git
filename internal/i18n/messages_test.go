@@ -49,3 +49,12 @@ func TestLanguageOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestEnglishInBranchesPlural(t *testing.T) {
+	if got := En.InBranches(1, "main"); got != "In 1 branch: main" {
+		t.Fatalf("InBranches(1) = %q", got)
+	}
+	if got := En.InBranches(3, "a, b, c"); got != "In 3 branches: a, b, c" {
+		t.Fatalf("InBranches(3) = %q", got)
+	}
+}
