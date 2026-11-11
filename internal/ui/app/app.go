@@ -356,6 +356,7 @@ func (m *Model) editorTabs(c ui.C) {
 func (m *Model) editorTab(c ui.C, screen, label string, icon gfx.Icon) ui.Box {
 	t := c.Theme()
 	tab := ui.TabBase(c, &m.tools.screen, screen, label).Height(28).PadX(8).Gap(8).Radius(4).
+		Disabled(m.tools.busy && screen != "").
 		Hover(ui.Look{}.Background(t.Hover)).Focus(ui.Look{}.Ring(2, t.Ring))
 	if m.tools.screen == screen {
 		tab.Background(t.Selection)
