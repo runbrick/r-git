@@ -503,7 +503,7 @@ func (m *Model) applyCommit(result *loadResult) {
 		return
 	}
 	if result.committed {
-		m.commit.ClearMessage()
+		m.commit.ResetAfterCommit()
 		m.commit.ShowToast("Committed", result.toast, ui.ToastSuccess)
 		if result.pushAfter && m.OnPush != nil {
 			m.OnPush()

@@ -349,6 +349,7 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 		results, err := pusher.Push(ctx, s.defaultRemote(), "--tags", false, false)
 		if err != nil && len(results) == 0 {
 			s.emit(UIEvent{Error: err.Error()})
+			return
 		}
 		all = append(all, results...)
 	}

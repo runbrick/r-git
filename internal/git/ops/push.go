@@ -2,6 +2,8 @@ package ops
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -115,6 +117,8 @@ func parseType(flag string) (PushNativeResultType, bool) {
 
 // Push executes a git push operation. setUpstream sets the local branch's
 // upstream to the pushed remote branch when the refspec is a branch mapping.
+// A non-zero exit with ref results is represented by those results (including
+// rejections); without ref results, the returned error wraps command.ExitError.
 func (p *Service) Push(ctx context.Context, remote string, refspec string, force, setUpstream bool) ([]PushNativeResult, error) {
 	args := []string{"--porcelain"}
 	if force {
@@ -127,13 +131,18 @@ func (p *Service) Push(ctx context.Context, remote string, refspec string, force
 
 	res, err := p.run(ctx, "push", args...)
 	if err != nil {
-		if _, ok := err.(*command.ExitError); !ok {
+		var exitErr *command.ExitError
+		if !errors.As(err, &exitErr) {
 			return nil, err
 		}
 	}
 
 	lines := strings.Split(string(res.Stdout), "\n")
-	return ParsePushNativeResult(lines), nil
+	results := ParsePushNativeResult(lines)
+	if err != nil && len(results) == 0 {
+		return nil, fmt.Errorf("push to %q: %w", remote, err)
+	}
+	return results, nil
 }
 
 // Ensure PushNativeResultType matches Java enums

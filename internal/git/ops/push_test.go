@@ -2,15 +2,19 @@ package ops_test
 
 import (
 	"context"
+	"errors"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/runbrick/r-git/internal/git/command"
 	"github.com/runbrick/r-git/internal/git/ops"
+	"github.com/runbrick/r-git/internal/testutil"
 )
 
 func TestParsePushNativeResult(t *testing.T) {
@@ -227,5 +231,55 @@ func TestPushOperation(t *testing.T) {
 	// Either PushNewRef, PushSuccess or PushRejected depending on state (should be NewRef on first bare repo push)
 	if res[0].Type != ops.PushNewRef && res[0].Type != ops.PushSuccess && res[0].Type != ops.PushRejected {
 		t.Errorf("Expected success, new ref, or rejected, got %v", res[0].Type)
+	}
+}
+
+func TestPushFailures(t *testing.T) {
+	for _, name := range []string{"missing remote", "unreachable file URL", "non-fast-forward"} {
+		t.Run(name, func(t *testing.T) {
+			g := testutil.NewRepo(t)
+			g.WriteFile("base.txt", "base\n")
+			g.Commit("base")
+			g.Git("branch", "-M", "main")
+			runner, err := command.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			remote := "missing-remote"
+			switch name {
+			case "unreachable file URL":
+				path := filepath.ToSlash(filepath.Join(t.TempDir(), "missing.git"))
+				if !strings.HasPrefix(path, "/") {
+					path = "/" + path
+				}
+				remote = (&url.URL{Scheme: "file", Path: path}).String()
+			case "non-fast-forward":
+				remote = filepath.Join(t.TempDir(), "remote.git")
+				g.Git("init", "--bare", remote)
+				g.Git("push", remote, "main:main")
+				g.WriteFile("base.txt", "remote\n")
+				g.Commit("remote change")
+				g.Git("push", remote, "main:main")
+				g.Git("reset", "--hard", "HEAD~1")
+				g.WriteFile("base.txt", "local\n")
+				g.Commit("local change")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			results, err := ops.New(runner, g.Dir).Push(ctx, remote, "main:main", false, false)
+			if name == "non-fast-forward" {
+				if err != nil || len(results) != 1 || !results[0].IsNonFFUpdate() {
+					t.Fatalf("results = %#v, error = %v", results, err)
+				}
+				return
+			}
+			var exitErr *command.ExitError
+			if !errors.As(err, &exitErr) || exitErr.Code != 128 || len(results) != 0 {
+				t.Fatalf("results = %#v, error = %v", results, err)
+			}
+			if exitErr.Stderr == "" || !strings.Contains(err.Error(), strings.TrimSpace(exitErr.Stderr)) {
+				t.Fatalf("lost git diagnostics: %v", err)
+			}
+		})
 	}
 }

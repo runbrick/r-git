@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/runbrick/r-git/internal/git/command"
@@ -99,21 +100,37 @@ func TestServiceRemoteProgress(t *testing.T) {
 }
 
 func TestServicePushPreservesExitResults(t *testing.T) {
-	for _, output := range []string{"!\trefs/heads/main:refs/heads/main\t[rejected] (non-fast-forward)\n", ""} {
-		s := ops.New(serviceExecutor{run: func(context.Context, command.Cmd) (command.Result, error) {
-			return command.Result{Stdout: []byte(output)}, &command.ExitError{Code: 1}
-		}}, "bound-repository")
-		results, err := s.Push(context.Background(), "origin", "main:main", false, false)
-		// Existing behavior: Git exit errors are represented only by parsed
-		// porcelain results, even when Git produced no parseable ref result.
-		if err != nil {
-			t.Fatal(err)
-		}
-		if output == "" && len(results) != 0 {
-			t.Fatalf("unexpected results: %#v", results)
-		}
-		if output != "" && (len(results) != 1 || !results[0].IsNonFFUpdate()) {
-			t.Fatalf("lost rejection: %#v", results)
-		}
+	for _, tt := range []struct {
+		name      string
+		output    string
+		wantError bool
+	}{
+		{"rejected ref", "!\trefs/heads/main:refs/heads/main\t[rejected] (non-fast-forward)\n", false},
+		{"empty stdout", "", true},
+		{"no ref results", "To origin\nDone\n", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			exitErr := &command.ExitError{Code: 1, Stderr: "remote unavailable"}
+			s := ops.New(serviceExecutor{run: func(context.Context, command.Cmd) (command.Result, error) {
+				return command.Result{Stdout: []byte(tt.output)}, exitErr
+			}}, "bound-repository")
+			results, err := s.Push(context.Background(), "origin", "main:main", false, false)
+			if tt.wantError {
+				var got *command.ExitError
+				if !errors.As(err, &got) || got != exitErr || err == exitErr {
+					t.Fatalf("expected wrapped ExitError, got %v", err)
+				}
+				if !strings.Contains(err.Error(), exitErr.Stderr) || len(results) != 0 {
+					t.Fatalf("results = %#v, error = %v", results, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(results) != 1 || !results[0].IsNonFFUpdate() {
+				t.Fatalf("lost rejection: %#v", results)
+			}
+		})
 	}
 }
