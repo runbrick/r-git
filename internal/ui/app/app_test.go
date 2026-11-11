@@ -264,7 +264,10 @@ func waitFor(t *testing.T, driver *viva.Driver, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := driver.Pump(); err != nil {
+		// A fast initial error can publish before NewDriver binds its wake
+		// handler. Deliver the loading spinner's scheduled frame as the real
+		// window and headless runner do, in addition to background wakes.
+		if err := driver.Advance(16 * time.Millisecond); err != nil {
 			t.Fatal(err)
 		}
 		if condition() {
