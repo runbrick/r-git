@@ -52,7 +52,7 @@ func TestCheckoutWithoutProblems(t *testing.T) {
 	repo.WriteFile("a.txt", "b\n")
 	repo.Commit("on master")
 
-	hash, err := Branches{svc}.Checkout(context.Background(), "feature")
+	hash, err := svc.Checkout(context.Background(), "feature")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestCheckoutWithLocalChangesOverwrittenByCheckout(t *testing.T) {
 	repo.Git("checkout", "master")
 	repo.WriteFile("a.txt", "dirty\n")
 
-	_, err := Branches{svc}.Checkout(context.Background(), "feature")
+	_, err := svc.Checkout(context.Background(), "feature")
 	var overwritten *command.ErrLocalChangesWouldBeOverwritten
 	if !errors.As(err, &overwritten) {
 		t.Fatalf("got %v, want ErrLocalChangesWouldBeOverwritten", err)
@@ -108,7 +108,7 @@ func TestCheckoutWithSeveralLocalChangesOverwritten(t *testing.T) {
 	repo.WriteFile("a.txt", "dirty-a\n")
 	repo.WriteFile("b.txt", "dirty-b\n")
 
-	_, err := Branches{svc}.Checkout(context.Background(), "feature")
+	_, err := svc.Checkout(context.Background(), "feature")
 	var overwritten *command.ErrLocalChangesWouldBeOverwritten
 	if !errors.As(err, &overwritten) {
 		t.Fatalf("got %v", err)
@@ -135,13 +135,13 @@ func TestAgreeToSmartCheckout(t *testing.T) {
 	repo.WriteFile("a.txt", "dirty\n")
 	repo.WriteFile("keep.txt", "local\n")
 
-	_, err := (Branches{svc}).Checkout(context.Background(), "feature")
+	_, err := svc.Checkout(context.Background(), "feature")
 	var overwritten *command.ErrLocalChangesWouldBeOverwritten
 	if !errors.As(err, &overwritten) {
 		t.Fatalf("plain checkout: got %v, want local-changes error", err)
 	}
 
-	hash, err := (Branches{svc}).CheckoutWithStash(context.Background(), "feature", "Checkout")
+	hash, err := svc.CheckoutWithStash(context.Background(), "feature", "Checkout")
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("got %v, want a conflict from the unstash", err)
 	}
@@ -171,7 +171,7 @@ func TestCheckoutWithUntrackedFilesOverwritten(t *testing.T) {
 	repo.Git("checkout", "master")
 	repo.WriteFile("new.txt", "untracked\n")
 
-	_, err := Branches{svc}.Checkout(context.Background(), "feature")
+	_, err := svc.Checkout(context.Background(), "feature")
 	var overwritten *command.ErrUntrackedFilesWouldBeOverwritten
 	if !errors.As(err, &overwritten) {
 		t.Fatalf("got %v, want ErrUntrackedFilesWouldBeOverwritten", err)
@@ -202,7 +202,7 @@ func TestCheckoutWithUnmergedFiles(t *testing.T) {
 		t.Fatalf("expected a merge conflict, got %s", out)
 	}
 
-	_, err := Branches{svc}.Checkout(context.Background(), "side")
+	_, err := svc.Checkout(context.Background(), "side")
 	if !errors.Is(err, ErrUnmergedFiles) {
 		t.Fatalf("got %v, want ErrUnmergedFiles", err)
 	}
@@ -215,7 +215,7 @@ func TestCreateNewBranchWithoutProblems(t *testing.T) {
 	repo.WriteFile("a.txt", "a\n")
 	base := repo.Commit("init")
 
-	hash, err := Branches{svc}.CheckoutNew(context.Background(), "feature", "")
+	hash, err := svc.CheckoutNew(context.Background(), "feature", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestCreateNewBranchNotAtHEAD(t *testing.T) {
 	repo.WriteFile("a.txt", "b\n")
 	repo.Commit("second")
 
-	hash, err := Branches{svc}.CheckoutNew(context.Background(), "from-first", first)
+	hash, err := svc.CheckoutNew(context.Background(), "from-first", first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestDeleteBranchThatIsFullyMerged(t *testing.T) {
 	repo.Commit("init")
 	repo.Git("branch", "feature")
 
-	if err := (Branches{Service: svc}).Delete(context.Background(), "feature", false); err != nil {
+	if err := svc.DeleteBranch(context.Background(), "feature", false); err != nil {
 		t.Fatal(err)
 	}
 	out := repo.Git("branch", "--list", "feature")
@@ -279,7 +279,7 @@ func TestDeleteUnmergedBranch(t *testing.T) {
 	tip := repo.Commit("feature commit")
 	repo.Git("checkout", "master")
 
-	err := Branches{svc}.Delete(context.Background(), "feature", false)
+	err := svc.DeleteBranch(context.Background(), "feature", false)
 	var unmerged *ErrNotFullyMerged
 	if !errors.As(err, &unmerged) {
 		t.Fatalf("got %v, want ErrNotFullyMerged", err)
@@ -294,7 +294,7 @@ func TestDeleteUnmergedBranch(t *testing.T) {
 		t.Fatal("branch was deleted")
 	}
 
-	if err := (Branches{Service: svc}).Delete(context.Background(), "feature", true); err != nil {
+	if err := svc.DeleteBranch(context.Background(), "feature", true); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(repo.Git("branch", "--list", "feature")) != "" {
@@ -320,7 +320,7 @@ func TestDeleteBranchMergedToHeadButUnmergedToUpstream(t *testing.T) {
 	repo.Git("checkout", "master")
 	repo.Git("merge", "--ff-only", "feature")
 
-	err := Branches{svc}.Delete(context.Background(), "feature", false)
+	err := svc.DeleteBranch(context.Background(), "feature", false)
 	var unmerged *ErrNotFullyMerged
 	if !errors.As(err, &unmerged) {
 		t.Fatalf("got %v, want ErrNotFullyMerged", err)
@@ -341,7 +341,7 @@ func TestRenameBranchShouldKeepUpstream(t *testing.T) {
 	repo.Git("checkout", "-b", "feature")
 	repo.Git("push", "-u", "origin", "feature")
 
-	if err := (Branches{Service: svc}).Rename(context.Background(), "feature", "renamed", false); err != nil {
+	if err := svc.RenameBranch(context.Background(), "feature", "renamed", false); err != nil {
 		t.Fatal(err)
 	}
 	if branchOf(t, repo) != "renamed" {
@@ -364,7 +364,7 @@ func TestRenameBranchUnsetUpstream(t *testing.T) {
 	repo.Git("checkout", "-b", "feature")
 	repo.Git("push", "-u", "origin", "feature")
 
-	if err := (Branches{Service: svc}).Rename(context.Background(), "feature", "renamed", true); err != nil {
+	if err := svc.RenameBranch(context.Background(), "feature", "renamed", true); err != nil {
 		t.Fatal(err)
 	}
 	out, err := repo.GitAllowError("rev-parse", "--abbrev-ref", "renamed@{upstream}")
@@ -384,7 +384,7 @@ func TestCheckoutBranchAlreadyCheckedOutInAnotherWorktree(t *testing.T) {
 	other := filepath.Join(filepath.Dir(repo.Dir), "other")
 	repo.Git("worktree", "add", other, "feature")
 
-	_, err := Branches{svc}.Checkout(context.Background(), "feature")
+	_, err := svc.Checkout(context.Background(), "feature")
 	var inUse *command.ErrBranchCheckedOutInWorktree
 	if !errors.As(err, &inUse) {
 		t.Fatalf("got %v, want ErrBranchCheckedOutInWorktree", err)
@@ -411,7 +411,7 @@ func TestSmartCheckoutConflictKeepsRecoverableChanges(t *testing.T) {
 	g.Git("checkout", "-q", original)
 	g.WriteFile("file.txt", "local\n")
 	g.WriteFile("keep.txt", "saved too\n")
-	hash, err := (Branches{svc}).CheckoutWithStash(context.Background(), "other", "Checkout")
+	hash, err := svc.CheckoutWithStash(context.Background(), "other", "Checkout")
 	var restore *ErrCheckoutRestore
 	if !errors.As(err, &restore) || !errors.Is(err, ErrConflict) {
 		t.Fatalf("restore = %v", err)
@@ -458,7 +458,7 @@ func TestSmartCheckoutCleanRestoreAndExistingStash(t *testing.T) {
 			if dirty {
 				g.WriteFile("file.txt", strings.Replace(base, "last", "local last", 1))
 			}
-			hash, err := (Branches{svc}).CheckoutWithStash(context.Background(), "other", "Checkout")
+			hash, err := svc.CheckoutWithStash(context.Background(), "other", "Checkout")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -219,14 +219,14 @@ func readDiff(ctx context.Context, r *repo.Repo, hash model.Hash, path string) (
 func (m *Model) showConflicts() {
 	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
 		out := &workflowResult{kind: workflowConflicts}
-		out.conflicts, out.err = (ops.Operations{Dir: r.Path, Git: r.Executor}).Conflicts(ctx)
+		out.conflicts, out.err = ops.New(r.Executor, r.Path).Conflicts(ctx)
 		return out
 	})
 }
 func (m *Model) openConflict(conflict ops.Conflict) {
 	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
 		out := &workflowResult{kind: workflowFile, path: conflict.Path}
-		out.content, out.err = (ops.Operations{Dir: r.Path, Git: r.Executor}).ConflictContent(ctx, conflict)
+		out.content, out.err = ops.New(r.Executor, r.Path).ConflictContent(ctx, conflict)
 		return out
 	})
 }
@@ -239,7 +239,7 @@ func (m *Model) resolveConflict(path string, data []byte) {
 	// returned to the empty state.
 	m.tools.busy = true
 	m.tools.merge.Busy = true
-	o := ops.Operations{Dir: m.repo.Path, Git: m.repo.Executor}
+	o := ops.New(m.repo.Executor, m.repo.Path)
 	ctx := m.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -271,14 +271,14 @@ func (m *Model) resolveConflict(path string, data []byte) {
 func (m *Model) prepareRebase(upstream string) {
 	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
 		out := &workflowResult{kind: workflowTodo, path: upstream}
-		out.entries, out.err = rebaseview.Prepare(ctx, ops.Operations{Dir: r.Path, Git: r.Executor}, upstream)
+		out.entries, out.err = rebaseview.Prepare(ctx, ops.New(r.Executor, r.Path), upstream)
 		return out
 	})
 }
 func (m *Model) applyRebase(upstream string, original, edited []ops.RebaseEntry) {
 	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
 		out := &workflowResult{kind: workflowRebased}
-		out.rebase = rebaseview.Apply(ctx, ops.Operations{Dir: r.Path, Git: r.Executor}, upstream, original, edited)
+		out.rebase = rebaseview.Apply(ctx, ops.New(r.Executor, r.Path), upstream, original, edited)
 		out.err = out.rebase.Err
 		return out
 	})
@@ -314,7 +314,7 @@ func (m *Model) applyWorkflow(out *workflowResult) {
 			// accept buttons disabled on "Loading…".
 			first := out.conflicts[0]
 			m.tools.merge.Busy = true
-			content, err := (ops.Operations{Dir: m.repo.Path, Git: m.repo.Executor}).ConflictContent(context.Background(), first)
+			content, err := ops.New(m.repo.Executor, m.repo.Path).ConflictContent(context.Background(), first)
 			m.tools.merge.Busy = false
 			if err != nil {
 				m.tools.merge.Error = err.Error()
@@ -356,7 +356,7 @@ func (m *Model) applyWorkflow(out *workflowResult) {
 
 func (m *Model) controlRebase(action string) {
 	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
-		o := ops.Operations{Dir: r.Path, Git: r.Executor}
+		o := ops.New(r.Executor, r.Path)
 		out := &workflowResult{kind: workflowRebased}
 		switch action {
 		case "continue":

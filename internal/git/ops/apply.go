@@ -67,7 +67,7 @@ func (s *Service) applyCommits(ctx context.Context, sub string, hashes []string,
 				}
 				continue
 			}
-			return created, fmt.Errorf("%s %s: %w", sub, hash, classify(res, err, command.Merge))
+			return created, fmt.Errorf("%s %s: %w", sub, hash, classify(res, err, command.Merge, ""))
 		}
 		after, err := s.head(ctx)
 		if err != nil {

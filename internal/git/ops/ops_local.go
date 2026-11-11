@@ -30,7 +30,7 @@ var ErrConflict = errors.New("merge conflict")
 // is already present (an empty cherry-pick).
 var ErrAlreadyApplied = errors.New("commit already applied")
 
-// ErrNotFullyMerged is returned by Branches.Delete when git refuses to
+// ErrNotFullyMerged is returned by Service.DeleteBranch when git refuses to
 // delete a branch that is not fully merged and Force is false.
 // Commits lists the commits reachable from the branch and not from Base
 // (git log --format=%H Base..name). Base is the branch git named in the
@@ -50,10 +50,21 @@ var ErrGPGSign = errors.New("gpg failed to sign the data")
 
 // classify turns a failed git invocation into a typed error when the
 // output matches a detector Java uses. Otherwise it returns the original
-// error, which is a *command.ExitError.
-func classify(res command.Result, err error, op command.OverwriteOperation) error {
+// error, which is a *command.ExitError. A non-empty operation selects the
+// merge/rebase outcome policy: only Git exit errors with CONFLICT output are
+// conflicts (returned as bare ErrConflict), and other errors retain their
+// cause with the operation prefix.
+// Keeping that policy explicit preserves the existing result and error APIs.
+func classify(res command.Result, err error, op command.OverwriteOperation, operation string) error {
 	if err == nil {
 		return nil
+	}
+	if operation != "" {
+		var exit *command.ExitError
+		if errors.As(err, &exit) && (strings.Contains(string(res.Stdout)+string(res.Stderr), "CONFLICT") || strings.Contains(exit.Stderr, "CONFLICT")) {
+			return ErrConflict
+		}
+		return fmt.Errorf("%s: %w", operation, err)
 	}
 	lines := append(append([]string{}, res.ErrorLines...), res.OutputLines...)
 	if detected := command.DetectLocalChangesWouldBeOverwritten(lines, op); detected != nil {

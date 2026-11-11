@@ -60,13 +60,12 @@ func TestPullerMerge(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	puller := ops.NewPuller(runner)
+	puller := ops.New(runner, localDir)
 
 	err = puller.Pull(ctx, ops.PullParams{
-		RepoPath: localDir,
-		Remote:   "origin",
-		Branch:   "master",
-		Method:   ops.PullMethodMerge,
+		Remote: "origin",
+		Branch: "master",
+		Method: ops.PullMethodMerge,
 	})
 	if err != nil {
 		t.Fatalf("Pull failed: %v", err)
@@ -141,13 +140,12 @@ func TestPullerRebase(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	puller := ops.NewPuller(runner)
+	puller := ops.New(runner, localDir)
 
 	err = puller.Pull(ctx, ops.PullParams{
-		RepoPath: localDir,
-		Remote:   "origin",
-		Branch:   "master",
-		Method:   ops.PullMethodRebase,
+		Remote: "origin",
+		Branch: "master",
+		Method: ops.PullMethodRebase,
 	})
 	if err != nil {
 		t.Fatalf("Pull failed: %v", err)
@@ -186,14 +184,14 @@ func TestPullerStash(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	puller := ops.NewPuller(runner)
+	puller := ops.New(runner, localDir)
 
-	err = puller.Stash(ctx, localDir, "saving changes")
+	err = puller.Stash(ctx, "saving changes")
 	if err != nil {
 		t.Fatalf("Stash failed: %v", err)
 	}
 
-	hasStash, err := puller.StashList(ctx, localDir)
+	hasStash, err := puller.StashList(ctx)
 	if err != nil {
 		t.Fatalf("StashList failed: %v", err)
 	}
@@ -209,7 +207,7 @@ func TestPullerStash(t *testing.T) {
 		t.Errorf("Expected test.txt to be reset to 'initial', got: %s", string(content))
 	}
 
-	err = puller.Unstash(ctx, localDir)
+	err = puller.Unstash(ctx)
 	if err != nil {
 		t.Fatalf("Unstash failed: %v", err)
 	}

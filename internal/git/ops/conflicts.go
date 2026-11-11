@@ -13,7 +13,7 @@ type Conflict struct {
 	Base, Ours, Theirs bool
 }
 
-func (o Operations) Conflicts(ctx context.Context) ([]Conflict, error) {
+func (o *Service) Conflicts(ctx context.Context) ([]Conflict, error) {
 	res, err := o.run(ctx, "diff", "--name-only", "--diff-filter=U", "-z")
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func (o Operations) Conflicts(ctx context.Context) ([]Conflict, error) {
 	return conflicts, nil
 }
 
-func (o Operations) ReadVersions(ctx context.Context, path string) (base, ours, theirs []byte, err error) {
+func (o *Service) ReadVersions(ctx context.Context, path string) (base, ours, theirs []byte, err error) {
 	values := []*[]byte{&base, &ours, &theirs}
 	for i := 1; i <= 3; i++ {
 		res, e := o.run(ctx, "show", fmt.Sprintf(":%d:%s", i, path))
@@ -49,28 +49,28 @@ func (o Operations) ReadVersions(ctx context.Context, path string) (base, ours, 
 	return base, ours, theirs, nil
 }
 
-func (o Operations) Resolve(ctx context.Context, path string, content []byte) error {
-	if err := writeWorktreeFile(o.Dir, path, content); err != nil {
+func (o *Service) Resolve(ctx context.Context, path string, content []byte) error {
+	if err := writeWorktreeFile(o.Root, path, content); err != nil {
 		return err
 	}
 	_, err := o.run(ctx, "add", "--", path)
 	return err
 }
-func (o Operations) AcceptOurs(ctx context.Context, path string) error {
+func (o *Service) AcceptOurs(ctx context.Context, path string) error {
 	stage := 2
 	if o.isRebasing(ctx) {
 		stage = 3
 	}
 	return o.accept(ctx, path, stage)
 }
-func (o Operations) AcceptTheirs(ctx context.Context, path string) error {
+func (o *Service) AcceptTheirs(ctx context.Context, path string) error {
 	stage := 3
 	if o.isRebasing(ctx) {
 		stage = 2
 	}
 	return o.accept(ctx, path, stage)
 }
-func (o Operations) accept(ctx context.Context, path string, stage int) error {
+func (o *Service) accept(ctx context.Context, path string, stage int) error {
 	res, err := o.run(ctx, "show", fmt.Sprintf(":%d:%s", stage, path))
 	if err != nil {
 		return err
@@ -78,13 +78,13 @@ func (o Operations) accept(ctx context.Context, path string, stage int) error {
 	return o.Resolve(ctx, path, res.Stdout)
 }
 
-func (o Operations) isRebasing(ctx context.Context) bool {
+func (o *Service) isRebasing(ctx context.Context) bool {
 	for _, dir := range []string{"rebase-merge", "rebase-apply"} {
 		res, err := o.run(ctx, "rev-parse", "--path-format=absolute", "--git-path", dir)
 		if err == nil {
 			path := strings.TrimSpace(string(res.Stdout))
 			if !filepath.IsAbs(path) {
-				path = filepath.Join(o.Dir, path)
+				path = filepath.Join(o.Root, path)
 			}
 			if info, err := os.Stat(path); err == nil && info.IsDir() {
 				return true

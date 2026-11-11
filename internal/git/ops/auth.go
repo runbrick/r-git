@@ -259,7 +259,7 @@ func HandleAskpass() bool {
 	return true
 }
 
-func ExecuteWithAuth(ctx context.Context, runner *command.Runner, cmd command.Cmd, provider CredentialProvider) (*command.Result, error) {
+func ExecuteWithAuth(ctx context.Context, runner command.Executor, cmd command.Cmd, provider CredentialProvider) (*command.Result, error) {
 	if provider != nil {
 		am, err := NewAuthManager(provider)
 		if err != nil {

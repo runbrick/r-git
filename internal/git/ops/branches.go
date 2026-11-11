@@ -12,9 +12,6 @@ import (
 	"github.com/runbrick/r-git/internal/git/model"
 )
 
-// Branches runs checkout, branch creation, deletion, and rename.
-type Branches struct{ *Service }
-
 // Checkout switches HEAD to name.
 // name is a branch, a tag, or any revision git checkout accepts.
 //
@@ -24,7 +21,7 @@ type Branches struct{ *Service }
 // CheckoutWithStash. Untracked files that would be overwritten, unmerged
 // index entries, and a branch already checked out in another worktree are
 // returned as the matching command errors.
-func (b Branches) Checkout(ctx context.Context, name string) (model.Hash, error) {
+func (b *Service) Checkout(ctx context.Context, name string) (model.Hash, error) {
 	return b.checkout(ctx, []string{name})
 }
 
@@ -33,7 +30,7 @@ func (b Branches) Checkout(ctx context.Context, name string) (model.Hash, error)
 // (git checkout -b name), matching GitCheckoutNewBranchOperation.
 // A non-empty startPoint is git checkout -b name startPoint,
 // matching GitImpl.checkout.
-func (b Branches) CheckoutNew(ctx context.Context, name, startPoint string) (model.Hash, error) {
+func (b *Service) CheckoutNew(ctx context.Context, name, startPoint string) (model.Hash, error) {
 	args := []string{"-b", name}
 	if startPoint != "" {
 		args = append(args, startPoint)
@@ -41,10 +38,10 @@ func (b Branches) CheckoutNew(ctx context.Context, name, startPoint string) (mod
 	return b.checkout(ctx, args)
 }
 
-func (b Branches) checkout(ctx context.Context, args []string) (model.Hash, error) {
+func (b *Service) checkout(ctx context.Context, args []string) (model.Hash, error) {
 	res, err := b.run(ctx, "checkout", args...)
 	if err != nil {
-		return model.Hash{}, classify(res, err, command.Checkout)
+		return model.Hash{}, classify(res, err, command.Checkout, "")
 	}
 	return b.head(ctx)
 }
@@ -57,7 +54,7 @@ func (b Branches) checkout(ctx context.Context, args []string) (model.Hash, erro
 // uses "Checkout". If restoring the stash fails, ErrCheckoutRestore identifies
 // the saved changes; the checkout itself has completed. A conflicting restore
 // leaves the unmerged index available to the conflict resolver, as in Java.
-func (b Branches) CheckoutWithStash(ctx context.Context, name, operation string) (model.Hash, error) {
+func (b *Service) CheckoutWithStash(ctx context.Context, name, operation string) (model.Hash, error) {
 	if operation == "" {
 		operation = "Checkout"
 	}
@@ -71,14 +68,14 @@ func (b Branches) CheckoutWithStash(ctx context.Context, name, operation string)
 	if containsFold(string(saved.Stdout), "No local changes to save") {
 		return b.Checkout(ctx, name)
 	}
-	stash, err := (Stash{b.Service}).tip(ctx)
+	stash, err := b.stashTip(ctx)
 	if err != nil {
 		return model.Hash{}, err
 	}
 	hash, checkoutErr := b.Checkout(ctx, name)
 	popRes, popErr := b.run(ctx, "stash", "pop", "stash@{0}")
 	if popErr != nil {
-		restoreErr := &ErrCheckoutRestore{Branch: name, Stash: stash, Cause: classify(popRes, popErr, command.Merge)}
+		restoreErr := &ErrCheckoutRestore{Branch: name, Stash: stash, Cause: classify(popRes, popErr, command.Merge, "")}
 		return hash, errors.Join(checkoutErr, restoreErr)
 	}
 	return hash, checkoutErr
@@ -99,14 +96,14 @@ func (e *ErrCheckoutRestore) Error() string {
 
 func (e *ErrCheckoutRestore) Unwrap() error { return e.Cause }
 
-// Delete removes the local branch name.
+// DeleteBranch removes the local branch name.
 // force selects git branch -D; otherwise git branch -d.
 //
 // When the branch is not fully merged and force is false, the error is
 // *ErrNotFullyMerged carrying the unmerged commits. Java shows those
 // commits in a dialog and then force-deletes on confirmation; this method
 // stops before the force delete so the UI can ask.
-func (b Branches) Delete(ctx context.Context, name string, force bool) error {
+func (b *Service) DeleteBranch(ctx context.Context, name string, force bool) error {
 	flag := "-d"
 	if force {
 		flag = "-D"
@@ -117,7 +114,7 @@ func (b Branches) Delete(ctx context.Context, name string, force bool) error {
 	}
 	lines := append(append([]string{}, res.ErrorLines...), res.OutputLines...)
 	if !command.DetectSimpleEvent(lines, command.BranchNotFullyMerged) {
-		return classify(res, err, command.Checkout)
+		return classify(res, err, command.Checkout, "")
 	}
 	base := unmergedBase(lines)
 	if base == "" {
@@ -154,11 +151,11 @@ func unmergedBase(lines []string) string {
 	return ""
 }
 
-// Rename renames old branch to new (git branch -m old new).
+// RenameBranch renames old branch to new (git branch -m old new).
 // When unsetUpstream is true, the upstream of the renamed branch is
 // cleared afterwards (git branch --unset-upstream new). A missing upstream
 // is ignored, matching GitRenameBranchOperation.
-func (b Branches) Rename(ctx context.Context, oldName, newName string, unsetUpstream bool) error {
+func (b *Service) RenameBranch(ctx context.Context, oldName, newName string, unsetUpstream bool) error {
 	if _, err := b.run(ctx, "branch", "-m", oldName, newName); err != nil {
 		return err
 	}

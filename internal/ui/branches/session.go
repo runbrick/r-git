@@ -182,7 +182,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 		s.Checkout.Confirmed = false
 		name := s.pendingCheckout
 		start(func(ctx context.Context) {
-			_, err := ops.Branches{Service: ops.New(s.runner, s.repo.Path)}.CheckoutWithStash(ctx, name, "Checkout")
+			_, err := ops.New(s.runner, s.repo.Path).CheckoutWithStash(ctx, name, "Checkout")
 			s.finishCheckout(err, name)
 		})
 	}
@@ -190,7 +190,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 		s.NewBranch.Confirmed = false
 		name, startPoint := s.NewBranch.Name, s.NewBranch.StartPoint
 		start(func(ctx context.Context) {
-			_, err := ops.Branches{Service: ops.New(s.runner, s.repo.Path)}.CheckoutNew(ctx, name, startPoint)
+			_, err := ops.New(s.runner, s.repo.Path).CheckoutNew(ctx, name, startPoint)
 			s.finish(err, "Created "+name)
 		})
 	}
@@ -198,7 +198,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 		s.Rename.Confirmed = false
 		old, name := s.Rename.Old, strings.TrimSpace(s.Rename.Name)
 		start(func(ctx context.Context) {
-			err := ops.Branches{Service: ops.New(s.runner, s.repo.Path)}.Rename(ctx, old, name, false)
+			err := ops.New(s.runner, s.repo.Path).RenameBranch(ctx, old, name, false)
 			s.finish(err, "Renamed to "+name)
 		})
 	}
@@ -222,8 +222,8 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 		s.Pull.Confirmed = false
 		remote, branch, method := s.Pull.Remote, s.Pull.Branch, s.Pull.Method
 		start(func(ctx context.Context) {
-			err := ops.NewPuller(s.runner).Pull(ctx, ops.PullParams{
-				RepoPath: s.repo.Path, Remote: remote, Branch: branch, Method: MethodOf(method, s.branchRebases()),
+			err := ops.New(s.runner, s.repo.Path).Pull(ctx, ops.PullParams{
+				Remote: remote, Branch: branch, Method: MethodOf(method, s.branchRebases()),
 			})
 			s.finish(err, "Pulled "+remote+"/"+branch)
 		})
@@ -245,7 +245,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 
 func (s *Session) startCheckout(name string, stashed bool, start func(func(context.Context)), refresh func()) {
 	start(func(ctx context.Context) {
-		branches := ops.Branches{Service: ops.New(s.runner, s.repo.Path)}
+		branches := ops.New(s.runner, s.repo.Path)
 		var err error
 		if stashed {
 			_, err = branches.CheckoutWithStash(ctx, name, "Checkout")
@@ -277,7 +277,7 @@ func (s *Session) finishCheckout(err error, name string) {
 }
 
 func (s *Session) deleteBranch(ctx context.Context, name string, force bool, start func(func(context.Context)), refresh func()) {
-	err := ops.Branches{Service: ops.New(s.runner, s.repo.Path)}.Delete(ctx, name, force)
+	err := ops.New(s.runner, s.repo.Path).DeleteBranch(ctx, name, force)
 	var unmerged *ops.ErrNotFullyMerged
 	if errors.As(err, &unmerged) {
 		s.emit(UIEvent{Unmerged: unmerged})
@@ -330,7 +330,7 @@ func (s *Session) outgoing(ctx context.Context) ([]PushTarget, error) {
 }
 
 func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bool, refresh func()) {
-	pusher := ops.NewPusher(s.runner)
+	pusher := ops.New(s.runner, s.repo.Path)
 	var all []ops.PushNativeResult
 	for _, target := range targets {
 		if !target.Selected {
@@ -338,7 +338,7 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 		}
 		refspec := target.Branch + ":" + target.Target
 		remoteName, _ := s.upstream(target.Branch)
-		results, err := pusher.Push(ctx, s.repo.Path, target.Remote, refspec, force, remoteName == "")
+		results, err := pusher.Push(ctx, target.Remote, refspec, force, remoteName == "")
 		if err != nil && len(results) == 0 {
 			s.emit(UIEvent{Error: err.Error()})
 			return
@@ -346,7 +346,7 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 		all = append(all, results...)
 	}
 	if tags {
-		results, err := pusher.Push(ctx, s.repo.Path, s.defaultRemote(), "--tags", false, false)
+		results, err := pusher.Push(ctx, s.defaultRemote(), "--tags", false, false)
 		if err != nil && len(results) == 0 {
 			s.emit(UIEvent{Error: err.Error()})
 		}
@@ -360,11 +360,10 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 }
 
 func (s *Session) pullThenPush(ctx context.Context, refresh func()) {
-	err := ops.NewPuller(s.runner).Pull(ctx, ops.PullParams{
-		RepoPath: s.repo.Path,
-		Remote:   s.defaultRemote(),
-		Branch:   s.currentBranch(),
-		Method:   MethodOf(s.settings.UpdateMethod, s.branchRebases()),
+	err := ops.New(s.runner, s.repo.Path).Pull(ctx, ops.PullParams{
+		Remote: s.defaultRemote(),
+		Branch: s.currentBranch(),
+		Method: MethodOf(s.settings.UpdateMethod, s.branchRebases()),
 	})
 	if err != nil {
 		s.finish(err, "")
@@ -384,7 +383,7 @@ func (s *Session) startFetch(start func(func(context.Context)), refresh func()) 
 	id := s.fetchToast
 	remote := s.defaultRemote()
 	start(func(ctx context.Context) {
-		err := ops.NewFetcher(s.runner).Fetch(ctx, ops.FetchParams{RepoPath: s.repo.Path, Remotes: []string{remote}})
+		err := ops.New(s.runner, s.repo.Path).Fetch(ctx, ops.FetchParams{Remotes: []string{remote}})
 		if err != nil {
 			s.emit(UIEvent{LoadingID: id, DoneTitle: "Fetch failed", DoneBody: err.Error(), DoneKind: ui.ToastError, Error: err.Error()})
 			return
@@ -406,17 +405,17 @@ func (s *Session) openStash(start func(func(context.Context))) {
 
 func (s *Session) runStash(req StashRequest, start func(func(context.Context)), refresh func()) {
 	start(func(ctx context.Context) {
-		st := ops.Stash{Service: ops.New(s.runner, s.repo.Path)}
+		st := ops.New(s.runner, s.repo.Path)
 		var err error
 		switch req.Action {
 		case StashCreate:
-			_, err = st.Save(ctx, req.Options)
+			_, err = st.SaveStash(ctx, req.Options)
 		case StashApply:
-			err = st.Apply(ctx, req.Ref)
+			err = st.ApplyStash(ctx, req.Ref)
 		case StashPop:
-			err = st.Pop(ctx, req.Ref)
+			err = st.PopStash(ctx, req.Ref)
 		case StashDrop:
-			err = st.Drop(ctx, req.Ref)
+			err = st.DropStash(ctx, req.Ref)
 		}
 		if err != nil {
 			s.finish(err, "")
@@ -435,22 +434,22 @@ func (s *Session) runStash(req StashRequest, start func(func(context.Context)), 
 }
 
 func (s *Session) applyRemotes(ctx context.Context, changes []RemoteChange, refresh func()) {
-	manager := ops.NewRemoteManager(s.runner)
+	manager := ops.New(s.runner, s.repo.Path)
 	for _, change := range changes {
 		var err error
 		switch {
 		case change.Add:
-			err = manager.AddRemote(ctx, s.repo.Path, change.Name, change.URL)
+			err = manager.AddRemote(ctx, change.Name, change.URL)
 		case change.Remove:
-			err = manager.RemoveRemote(ctx, s.repo.Path, change.Old)
+			err = manager.RemoveRemote(ctx, change.Old)
 		case change.Rename:
-			err = manager.RenameRemote(ctx, s.repo.Path, change.Old, change.Name)
+			err = manager.RenameRemote(ctx, change.Old, change.Name)
 			if err == nil && change.URL != "" {
-				err = manager.SetRemoteURL(ctx, s.repo.Path, change.Name, change.URL)
+				err = manager.SetRemoteURL(ctx, change.Name, change.URL)
 			}
 		default:
 			if change.URL != "" {
-				err = manager.SetRemoteURL(ctx, s.repo.Path, change.Name, change.URL)
+				err = manager.SetRemoteURL(ctx, change.Name, change.URL)
 			}
 		}
 		if err != nil {
@@ -463,7 +462,7 @@ func (s *Session) applyRemotes(ctx context.Context, changes []RemoteChange, refr
 
 func (s *Session) runMerge(ref string, start func(func(context.Context)), refresh func()) {
 	start(func(ctx context.Context) {
-		result := ops.Operations{Dir: s.repo.Path, Git: s.runner}.Merge(ctx, ref, ops.MergeOptions{})
+		result := ops.New(s.runner, s.repo.Path).Merge(ctx, ref, ops.MergeOptions{})
 		if result.Outcome == ops.OutcomeConflicts {
 			s.emit(UIEvent{Error: "Merge conflicts in " + ref, Refresh: true})
 			return
@@ -485,7 +484,7 @@ func (s *Session) checkoutAndRebase(ref string, start func(func(context.Context)
 		local = ref[i+1:]
 	}
 	start(func(ctx context.Context) {
-		branches := ops.Branches{Service: ops.New(s.runner, s.repo.Path)}
+		branches := ops.New(s.runner, s.repo.Path)
 		if _, err := branches.Checkout(ctx, local); err != nil {
 			if _, err = branches.CheckoutNew(ctx, local, ref); err != nil {
 				s.finish(err, "")

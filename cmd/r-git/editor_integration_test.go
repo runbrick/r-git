@@ -36,7 +36,8 @@ func TestBuiltBinaryRunsInteractiveRebaseEditor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	operations := ops.Operations{Dir: repo.Dir, Git: runner, Editor: binary}
+	operations := ops.New(runner, repo.Dir)
+	operations.Editor = binary
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	done := make(chan ops.RebaseResult, 1)

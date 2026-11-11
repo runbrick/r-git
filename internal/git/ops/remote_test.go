@@ -12,13 +12,13 @@ import (
 
 func TestRemoteManager(t *testing.T) {
 	localDir, runner := initTempRepo(t)
-	rm := ops.NewRemoteManager(runner)
+	rm := ops.New(runner, localDir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Test Add
-	err := rm.AddRemote(ctx, localDir, "origin", "file:///tmp/repo")
+	err := rm.AddRemote(ctx, "origin", "file:///tmp/repo")
 	if err != nil {
 		t.Fatalf("AddRemote failed: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestRemoteManager(t *testing.T) {
 	}
 
 	// Test SetURL
-	err = rm.SetRemoteURL(ctx, localDir, "origin", "file:///tmp/repo2")
+	err = rm.SetRemoteURL(ctx, "origin", "file:///tmp/repo2")
 	if err != nil {
 		t.Fatalf("SetRemoteURL failed: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestRemoteManager(t *testing.T) {
 	}
 
 	// Test Rename
-	err = rm.RenameRemote(ctx, localDir, "origin", "upstream")
+	err = rm.RenameRemote(ctx, "origin", "upstream")
 	if err != nil {
 		t.Fatalf("RenameRemote failed: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestRemoteManager(t *testing.T) {
 	}
 
 	// Test Remove
-	err = rm.RemoveRemote(ctx, localDir, "upstream")
+	err = rm.RemoveRemote(ctx, "upstream")
 	if err != nil {
 		t.Fatalf("RemoveRemote failed: %v", err)
 	}

@@ -13,16 +13,7 @@ const (
 	PullMethodRebase
 )
 
-type Puller struct {
-	runner *command.Runner
-}
-
-func NewPuller(runner *command.Runner) *Puller {
-	return &Puller{runner: runner}
-}
-
 type PullParams struct {
-	RepoPath   string
 	Remote     string
 	Branch     string
 	Method     PullMethod
@@ -30,7 +21,7 @@ type PullParams struct {
 	OnProgress func(command.Line)
 }
 
-func (p *Puller) Pull(ctx context.Context, params PullParams) error {
+func (p *Service) Pull(ctx context.Context, params PullParams) error {
 	args := []string{"--progress"}
 	if params.Method == PullMethodRebase {
 		args = append(args, "--rebase")
@@ -52,45 +43,30 @@ func (p *Puller) Pull(ctx context.Context, params PullParams) error {
 	cmd := command.Cmd{
 		Subcommand: "pull",
 		Args:       args,
-		Dir:        params.RepoPath,
+		Dir:        p.Root,
 	}
 
 	if params.OnProgress != nil {
-		_, err := p.runner.Stream(ctx, cmd, params.OnProgress)
+		_, err := p.Git.Stream(ctx, cmd, params.OnProgress)
 		return err
 	}
 
-	_, err := p.runner.Run(ctx, cmd)
+	_, err := p.Git.Run(ctx, cmd)
 	return err
 }
 
-func (p *Puller) Stash(ctx context.Context, repoPath, message string) error {
-	cmd := command.Cmd{
-		Subcommand: "stash",
-		Args:       []string{"push", "-m", message},
-		Dir:        repoPath,
-	}
-	_, err := p.runner.Run(ctx, cmd)
+func (p *Service) Stash(ctx context.Context, message string) error {
+	_, err := p.run(ctx, "stash", "push", "-m", message)
 	return err
 }
 
-func (p *Puller) Unstash(ctx context.Context, repoPath string) error {
-	cmd := command.Cmd{
-		Subcommand: "stash",
-		Args:       []string{"pop"},
-		Dir:        repoPath,
-	}
-	_, err := p.runner.Run(ctx, cmd)
+func (p *Service) Unstash(ctx context.Context) error {
+	_, err := p.run(ctx, "stash", "pop")
 	return err
 }
 
-func (p *Puller) StashList(ctx context.Context, repoPath string) (bool, error) {
-	cmd := command.Cmd{
-		Subcommand: "stash",
-		Args:       []string{"list"},
-		Dir:        repoPath,
-	}
-	res, err := p.runner.Run(ctx, cmd)
+func (p *Service) StashList(ctx context.Context) (bool, error) {
+	res, err := p.run(ctx, "stash", "list")
 	if err != nil {
 		return false, err
 	}

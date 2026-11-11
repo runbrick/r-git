@@ -1,55 +1,23 @@
 package ops
 
-import (
-	"context"
+import "context"
 
-	"github.com/runbrick/r-git/internal/git/command"
-)
-
-type RemoteManager struct {
-	runner *command.Runner
-}
-
-func NewRemoteManager(runner *command.Runner) *RemoteManager {
-	return &RemoteManager{runner: runner}
-}
-
-func (rm *RemoteManager) AddRemote(ctx context.Context, repoPath, name, url string) error {
-	cmd := command.Cmd{
-		Subcommand: "remote",
-		Args:       []string{"add", name, url},
-		Dir:        repoPath,
-	}
-	_, err := rm.runner.Run(ctx, cmd)
+func (rm *Service) AddRemote(ctx context.Context, name, url string) error {
+	_, err := rm.run(ctx, "remote", "add", name, url)
 	return err
 }
 
-func (rm *RemoteManager) RemoveRemote(ctx context.Context, repoPath, name string) error {
-	cmd := command.Cmd{
-		Subcommand: "remote",
-		Args:       []string{"remove", name},
-		Dir:        repoPath,
-	}
-	_, err := rm.runner.Run(ctx, cmd)
+func (rm *Service) RemoveRemote(ctx context.Context, name string) error {
+	_, err := rm.run(ctx, "remote", "remove", name)
 	return err
 }
 
-func (rm *RemoteManager) RenameRemote(ctx context.Context, repoPath, oldName, newName string) error {
-	cmd := command.Cmd{
-		Subcommand: "remote",
-		Args:       []string{"rename", oldName, newName},
-		Dir:        repoPath,
-	}
-	_, err := rm.runner.Run(ctx, cmd)
+func (rm *Service) RenameRemote(ctx context.Context, oldName, newName string) error {
+	_, err := rm.run(ctx, "remote", "rename", oldName, newName)
 	return err
 }
 
-func (rm *RemoteManager) SetRemoteURL(ctx context.Context, repoPath, name, url string) error {
-	cmd := command.Cmd{
-		Subcommand: "remote",
-		Args:       []string{"set-url", name, url},
-		Dir:        repoPath,
-	}
-	_, err := rm.runner.Run(ctx, cmd)
+func (rm *Service) SetRemoteURL(ctx context.Context, name, url string) error {
+	_, err := rm.run(ctx, "remote", "set-url", name, url)
 	return err
 }

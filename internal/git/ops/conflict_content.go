@@ -11,7 +11,7 @@ type ConflictContent struct {
 	LeftLabel, RightLabel string
 }
 
-func (o Operations) ConflictContent(ctx context.Context, conflict Conflict) (ConflictContent, error) {
+func (o *Service) ConflictContent(ctx context.Context, conflict Conflict) (ConflictContent, error) {
 	content := ConflictContent{LeftLabel: "Yours", RightLabel: "Theirs"}
 	values := []*string{&content.Base, &content.Left, &content.Right}
 	for i, exists := range []bool{conflict.Base, conflict.Ours, conflict.Theirs} {

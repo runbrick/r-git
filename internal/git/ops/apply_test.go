@@ -303,14 +303,14 @@ func TestCreateAndDeleteTag(t *testing.T) {
 	repo.WriteFile("a.txt", "b\n")
 	repo.Commit("second")
 
-	got, err := Tag{svc}.Create(context.Background(), "v1", first)
+	got, err := svc.CreateTag(context.Background(), "v1", first)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != first {
 		t.Fatalf("tag points at %s, want %s", got, first)
 	}
-	if _, err := (Tag{Service: svc}).Create(context.Background(), "v2", ""); err != nil {
+	if _, err := svc.CreateTag(context.Background(), "v2", ""); err != nil {
 		t.Fatal(err)
 	}
 	head := headOf(t, repo)
@@ -318,7 +318,7 @@ func TestCreateAndDeleteTag(t *testing.T) {
 	if points != head {
 		t.Fatalf("v2 points at %s, want %s", points, head)
 	}
-	if err := (Tag{Service: svc}).Delete(context.Background(), "v1"); err != nil {
+	if err := svc.DeleteTag(context.Background(), "v1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.GitAllowError("rev-parse", "v1"); err == nil {
