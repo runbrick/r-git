@@ -54,6 +54,7 @@ type Session struct {
 // UIEvent is a dialog or toast change a git worker asks the UI thread to apply.
 type UIEvent struct {
 	Error          string
+	ClearError     bool
 	Toast          string
 	ToastBody      string
 	ToastKind      ui.ToastKind
@@ -71,6 +72,7 @@ type UIEvent struct {
 	ShowRejected   bool
 	Stashes        []model.Stash
 	ShowStash      bool
+	UpdateStash    bool
 	Refresh        bool
 }
 
@@ -181,7 +183,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 		name := s.pendingCheckout
 		start(func(ctx context.Context) {
 			_, err := ops.Branches{Service: ops.New(s.runner, s.repo.Path)}.CheckoutWithStash(ctx, name, "Checkout")
-			s.finish(err, "Checked out "+name)
+			s.finishCheckout(err, name)
 		})
 	}
 	if s.NewBranch.Confirmed {
@@ -255,8 +257,23 @@ func (s *Session) startCheckout(name string, stashed bool, start func(func(conte
 			s.emit(UIEvent{CheckoutBranch: name, CheckoutFiles: overwritten.Files, Error: overwritten.Error()})
 			return
 		}
-		s.finish(err, "Checked out "+name)
+		s.finishCheckout(err, name)
 	})
+}
+
+func (s *Session) finishCheckout(err error, name string) {
+	var restore *ops.ErrCheckoutRestore
+	if errors.As(err, &restore) {
+		// Refresh even on a conflicting restore: HEAD has switched and the
+		// unmerged index must be visible to the Conflicts screen.
+		s.emit(UIEvent{Error: err.Error(), Toast: "Local changes not fully restored", ToastBody: "The stash was kept. Open Conflicts to resolve the remaining changes, or Open stash to inspect the saved changes.", ToastKind: ui.ToastWarning, Refresh: true})
+		return
+	}
+	if err == nil {
+		s.emit(UIEvent{ClearError: true, Toast: "Checked out " + name, Refresh: true})
+		return
+	}
+	s.finish(err, "Checked out "+name)
 }
 
 func (s *Session) deleteBranch(ctx context.Context, name string, force bool, start func(func(context.Context)), refresh func()) {
@@ -401,8 +418,8 @@ func (s *Session) runStash(req StashRequest, start func(func(context.Context)), 
 		case StashDrop:
 			err = st.Drop(ctx, req.Ref)
 		}
-		s.finish(err, "Stash updated")
 		if err != nil {
+			s.finish(err, "")
 			return
 		}
 		entries, listErr := s.repo.Stashes(ctx)
@@ -410,7 +427,10 @@ func (s *Session) runStash(req StashRequest, start func(func(context.Context)), 
 			s.emit(UIEvent{Error: listErr.Error()})
 			return
 		}
-		s.emit(UIEvent{ShowStash: true, Stashes: entries})
+		// An operation result updates the list, without reopening a dialog
+		// the user dismissed while git was running. Publish refresh together
+		// with the entries so the refresh cannot invalidate a later event.
+		s.emit(UIEvent{UpdateStash: true, Stashes: entries, Toast: "Stash updated", Refresh: true})
 	})
 }
 
@@ -497,6 +517,9 @@ func (s *Session) emit(event UIEvent) {
 
 // ApplyUI runs on the UI thread, from the shell's OnWake.
 func (s *Session) ApplyUI(event UIEvent) {
+	if event.ClearError {
+		s.Panel.Error = ""
+	}
 	if event.Error != "" {
 		s.Panel.Error = event.Error
 		s.Toaster.Show("Git error", event.Error, ui.ToastError)
@@ -526,6 +549,10 @@ func (s *Session) ApplyUI(event UIEvent) {
 	}
 	if event.ShowStash {
 		s.Stash.Show(event.Stashes)
+	}
+	if event.UpdateStash {
+		s.Stash.Entries = append(s.Stash.Entries[:0], event.Stashes...)
+		s.Stash.Selected = min(s.Stash.Selected, max(len(event.Stashes)-1, 0))
 	}
 }
 

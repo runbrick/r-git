@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -393,5 +394,93 @@ func TestCheckoutBranchAlreadyCheckedOutInAnotherWorktree(t *testing.T) {
 	}
 	if inUse.Path == "" {
 		t.Fatal("empty worktree path")
+	}
+}
+
+// A restore conflict keeps both index stages available to the merge UI and the
+// complete saved changes (including files restored cleanly) in the stash.
+func TestSmartCheckoutConflictKeepsRecoverableChanges(t *testing.T) {
+	svc, g := newService(t)
+	g.WriteFile("file.txt", "base\n")
+	g.WriteFile("keep.txt", "base\n")
+	g.Commit("base")
+	original := branchOf(t, g)
+	g.Git("checkout", "-qb", "other")
+	g.WriteFile("file.txt", "other\n")
+	g.Commit("other")
+	g.Git("checkout", "-q", original)
+	g.WriteFile("file.txt", "local\n")
+	g.WriteFile("keep.txt", "saved too\n")
+	hash, err := (Branches{svc}).CheckoutWithStash(context.Background(), "other", "Checkout")
+	var restore *ErrCheckoutRestore
+	if !errors.As(err, &restore) || !errors.Is(err, ErrConflict) {
+		t.Fatalf("restore = %v", err)
+	}
+	if hash.String() != headOf(t, g) || branchOf(t, g) != "other" {
+		t.Fatal("checkout did not complete")
+	}
+	if restore.Stash.String() != strings.TrimSpace(g.Git("rev-parse", "stash@{0}")) {
+		t.Fatal("saved stash identity lost")
+	}
+	if !strings.Contains(err.Error(), "stash kept") {
+		t.Fatalf("no recovery message: %v", err)
+	}
+	if !strings.Contains(g.Git("status", "--porcelain"), "UU file.txt") {
+		t.Fatal("conflict not exposed in the index")
+	}
+	if got := g.Git("show", ":2:file.txt"); got != "other\n" {
+		t.Fatalf("destination = %q", got)
+	}
+	if got := g.Git("show", ":3:file.txt"); got != "local\n" {
+		t.Fatalf("saved side = %q", got)
+	}
+	if got := g.Git("show", restore.Stash.String()+":keep.txt"); got != "saved too\n" {
+		t.Fatalf("saved changes = %q", got)
+	}
+}
+
+func TestSmartCheckoutCleanRestoreAndExistingStash(t *testing.T) {
+	for _, dirty := range []bool{false, true} {
+		t.Run(fmt.Sprint("dirty=", dirty), func(t *testing.T) {
+			svc, g := newService(t)
+			base := "first\nkeep 1\nkeep 2\nkeep 3\nkeep 4\nlast\n"
+			g.WriteFile("file.txt", base)
+			g.WriteFile("older.txt", "base\n")
+			g.Commit("base")
+			original := branchOf(t, g)
+			g.Git("checkout", "-qb", "other")
+			g.WriteFile("file.txt", strings.Replace(base, "first", "other first", 1))
+			g.Commit("other")
+			g.Git("checkout", "-q", original)
+			g.WriteFile("older.txt", "older stash\n")
+			g.Git("stash", "push", "-m", "unrelated saved work")
+			older := strings.TrimSpace(g.Git("rev-parse", "stash@{0}"))
+			if dirty {
+				g.WriteFile("file.txt", strings.Replace(base, "last", "local last", 1))
+			}
+			hash, err := (Branches{svc}).CheckoutWithStash(context.Background(), "other", "Checkout")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hash.String() != headOf(t, g) || branchOf(t, g) != "other" {
+				t.Fatal("checkout did not complete")
+			}
+			want := strings.Replace(base, "first", "other first", 1)
+			if dirty {
+				want = strings.Replace(want, "last", "local last", 1)
+			}
+			if got := fileText(t, g, "file.txt"); got != want {
+				t.Fatalf("restored %q want %q", got, want)
+			}
+			if got := strings.TrimSpace(g.Git("stash", "list", "--format=%H")); got != older {
+				t.Fatalf("older stash changed: %q", got)
+			}
+			if got := fileText(t, g, "older.txt"); got != "base\n" {
+				t.Fatalf("older stash applied: %q", got)
+			}
+			if unmerged := g.Git("ls-files", "-u"); unmerged != "" {
+				t.Fatal(unmerged)
+			}
+		})
 	}
 }

@@ -290,7 +290,7 @@ func (v *View) formPane(c ui.C) {
 		ui.Checkbox(c, &v.SignOff, "Sign-off")
 		ui.TextField(c, &v.Author, "Author", "Name <email>")
 		ui.Row(c).FillWidth().Gap(8).Children(func() {
-			commit := ui.Button(c, "Commit").Disabled(v.Busy)
+			commit := ui.Button(c, "Commit changes").Disabled(v.Busy)
 			push := ui.Button(c, "Commit and Push").Disabled(v.Busy)
 			if commit.Clicked() {
 				v.submit(false)

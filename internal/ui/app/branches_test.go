@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	branchui "github.com/runbrick/r-git/internal/ui/branches"
 	viva "github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/gfx"
+	"github.com/vivaui/viva/headless"
 )
 
 func TestBranchFlowsOnBareRemote(t *testing.T) {
@@ -62,7 +64,7 @@ func TestBranchFlowsOnBareRemote(t *testing.T) {
 	g.Commit("to push")
 	m.refresh()
 	waitFor(t, driver, func() bool { return hasLabel(driver, "pushed (current)") })
-	clickRightmost(t, driver, "Push")
+	clickControl(t, driver, "Push")
 	waitFor(t, driver, func() bool { return m.branches.Push.Open && len(m.branches.Push.Targets) > 0 })
 	clickControl(t, driver, "Push commits")
 	waitFor(t, driver, func() bool {
@@ -77,7 +79,7 @@ func TestBranchFlowsOnBareRemote(t *testing.T) {
 	g.Commit("local only")
 	m.refresh()
 	waitFor(t, driver, func() bool { return hasLabel(driver, mainBranch+" (current)") })
-	clickRightmost(t, driver, "Push")
+	clickControl(t, driver, "Push")
 	waitFor(t, driver, func() bool { return m.branches.Push.Open })
 	clickControl(t, driver, "Push commits")
 	waitFor(t, driver, func() bool { return m.branches.Push.ShowResults && branchui.RejectedNonFF(m.branches.Push.Results) })
@@ -87,7 +89,7 @@ func TestBranchFlowsOnBareRemote(t *testing.T) {
 
 	// Pull with rebase.
 	clickControl(t, driver, "Close")
-	clickRightmost(t, driver, "Pull")
+	clickControl(t, driver, "Pull")
 	waitFor(t, driver, func() bool { return m.branches.Pull.Open })
 	clickControl(t, driver, "Rebase")
 	if !m.branches.Pull.Open {
@@ -167,7 +169,15 @@ func TestCheckoutLocalChangesOffersStash(t *testing.T) {
 		t.Fatal("stash offer did not list the file from the typed error")
 	}
 	clickControl(t, driver, "Stash and checkout")
-	waitFor(t, driver, func() bool { return strings.TrimSpace(g.Git("branch", "--show-current")) == "other" })
+	waitFor(t, driver, func() bool {
+		return hasLabel(driver, "other (current)") && strings.Contains(m.branches.Panel.Error, "stash kept")
+	})
+	if strings.TrimSpace(g.Git("stash", "list")) == "" {
+		t.Fatal("conflicting stash was lost")
+	}
+	if !strings.Contains(g.Git("status", "--porcelain"), "UU base.txt") {
+		t.Fatal("unmerged index not available for resolution")
+	}
 }
 
 func TestCredentialsDialogBlocksProvider(t *testing.T) {
@@ -367,17 +377,6 @@ func clickLeftmost(t *testing.T, driver *viva.Driver, label string) {
 	}
 }
 
-func clickRightmost(t *testing.T, driver *viva.Driver, label string) {
-	t.Helper()
-	hit, ok := findHit(driver, label, false)
-	if !ok {
-		t.Fatalf("no control %q among %v", label, labelValues(driver))
-	}
-	if err := driver.Click(hit.Bounds.X+hit.Bounds.Width/2, hit.Bounds.Y+hit.Bounds.Height/2); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func rightClickLabel(t *testing.T, driver *viva.Driver, label string) {
 	t.Helper()
 	for _, item := range driver.Snapshot().Labels {
@@ -472,4 +471,150 @@ func gitEnv(g *testutil.Repo) []string {
 		"GIT_CONFIG_GLOBAL="+os.Getenv("GIT_CONFIG_GLOBAL"),
 		"GIT_CONFIG_SYSTEM="+os.Getenv("GIT_CONFIG_SYSTEM"),
 	)
+}
+
+func TestHeadlessStashDismissal(t *testing.T) {
+	for _, action := range []string{"escape", "Close dialog", "Close stash"} {
+		t.Run(action, func(t *testing.T) {
+			g := testutil.NewRepo(t)
+			g.WriteFile("base.txt", "base\n")
+			g.Commit("base")
+			g.WriteFile("base.txt", "dirty\n")
+			m, err := New(filepath.Join(t.TempDir(), "config"), g.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h, err := headless.Open(m.config(), nil, headless.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { h.Close(); m.stopWorkers() }()
+			check := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			check(h.Resize(1600, 1000))
+			check(h.WaitFor(func(viva.Snapshot) bool { return m.repo != nil && !m.log.Loading }, 10*time.Second))
+			check(h.ClickLabel("Open stash"))
+			check(h.WaitFor(func(viva.Snapshot) bool { return m.branches.Stash.Open }, 10*time.Second))
+			check(h.ClickLabel("textfield:Message"))
+			check(h.Type("keep this"))
+			check(h.ClickLabel("Save stash"))
+			check(h.WaitFor(func(viva.Snapshot) bool { return len(m.branches.Stash.Entries) > 0 }, 10*time.Second))
+			if action == "escape" {
+				check(h.Keys("escape"))
+			} else {
+				check(h.ClickLabel(action))
+			}
+			if m.branches.Stash.Open {
+				t.Fatalf("still open %s; tree %v", action, h.Tree(""))
+			}
+			check(h.WaitFor(func(snapshot viva.Snapshot) bool {
+				for _, text := range snapshot.Texts {
+					if text.Value == "Save stash" {
+						return false
+					}
+				}
+				return true
+			}, time.Second))
+		})
+	}
+}
+
+func TestCredentialsDismissalCancelsProvider(t *testing.T) {
+	for _, action := range []string{"escape", "Close dialog", "Cancel"} {
+		t.Run(action, func(t *testing.T) {
+			m, d := openDriver(t, "")
+			m.branches.Credentials.SetInvalidator(&m.invalidator)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				_, err := m.branches.Credentials.Credentials(ctx, ops.CredentialRequest{Prompt: "Password", Kind: ops.CredentialKindPassword})
+				done <- err
+			}()
+			waitFor(t, d, func() bool { return m.branches.Credentials.Pending() && hasLabel(d, "Git credentials") })
+			if action == "escape" {
+				if err := d.Key(gfx.KeyEscape, 0); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				clickControl(t, d, action)
+			}
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("dismissal returned %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("dismissal left askpass blocked")
+			}
+			if m.branches.Credentials.Pending() {
+				t.Fatal("dismissed prompt reopened")
+			}
+		})
+	}
+}
+
+func TestShellActionLabelsAreUnique(t *testing.T) {
+	g := testutil.NewRepo(t)
+	g.WriteFile("base.txt", "base\n")
+	g.Commit("base")
+	m, d := openDriver(t, g.Dir)
+	waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading })
+	assertCounts := func(labels ...string) {
+		t.Helper()
+		counts := map[string]int{}
+		for _, hit := range d.Snapshot().Hits {
+			counts[hit.Label]++
+		}
+		for _, label := range labels {
+			if counts[label] != 1 {
+				t.Fatalf("%q has %d hit targets", label, counts[label])
+			}
+		}
+	}
+	assertCounts("Fetch", "Pull", "Push", "Commit", "Fetch remote", "Pull changes", "Push branches")
+	clickControl(t, d, "Commit")
+	assertCounts("Fetch", "Pull", "Push", "Commit", "Commit changes")
+}
+
+func TestCheckoutWithCleanStashRestore(t *testing.T) {
+	g := testutil.NewRepo(t)
+	base := "first\nkeep 1\nkeep 2\nkeep 3\nkeep 4\nlast\n"
+	g.WriteFile("base.txt", base)
+	g.Commit("base")
+	original := current(g)
+	g.Git("checkout", "-qb", "other")
+	g.WriteFile("base.txt", strings.Replace(base, "first", "destination first", 1))
+	g.Commit("destination")
+	g.Git("checkout", "-q", original)
+	g.WriteFile("base.txt", strings.Replace(base, "last", "local last", 1))
+	m, d := openDriver(t, g.Dir)
+	waitFor(t, d, func() bool { return m.repo != nil && hasLabel(d, "other") })
+	chooseBranch(t, d, "other")
+	clickControl(t, d, "Branch actions")
+	clickControl(t, d, "Checkout")
+	waitFor(t, d, func() bool { return m.branches.Checkout.Open })
+	clickControl(t, d, "Stash and checkout")
+	waitFor(t, d, func() bool { return hasLabel(d, "other (current)") && !m.log.Loading })
+	if m.branches.Panel.Error != "" {
+		t.Fatal(m.branches.Panel.Error)
+	}
+	data, err := os.ReadFile(filepath.Join(g.Dir, "base.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(strings.Replace(base, "first", "destination first", 1), "last", "local last", 1)
+	if string(data) != want {
+		t.Fatalf("restored %q want %q", data, want)
+	}
+	if got := g.Git("stash", "list"); got != "" {
+		t.Fatalf("clean restore left stash %q", got)
+	}
+	if got := g.Git("ls-files", "-u"); got != "" {
+		t.Fatal(got)
+	}
 }

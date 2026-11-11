@@ -137,6 +137,10 @@ func TestDriverResolveMixedConflictChunks(t *testing.T) {
 	if err != nil || len(conflicts) != 0 {
 		t.Fatalf("not staged resolved: %v %v", conflicts, err)
 	}
+	clickControl(t, d, "Close conflicts")
+	if m.tools.screen != "" {
+		t.Fatal("conflicts screen did not close")
+	}
 }
 
 // A file load requested before Accept Theirs must not replace the result when

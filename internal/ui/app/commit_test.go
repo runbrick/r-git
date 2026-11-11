@@ -45,7 +45,7 @@ func TestCommitPanelGroupsStageCommitAmendAndDiscard(t *testing.T) {
 	if err := driver.Type("commit the staged files"); err != nil {
 		t.Fatal(err)
 	}
-	clickLowest(t, driver, "Commit")
+	clickControl(t, driver, "Commit changes")
 	waitFor(t, driver, func() bool { return !m.commit.Busy && (m.commit.Message == "" || m.commit.Error != "") })
 	if m.commit.Error != "" {
 		t.Fatal(m.commit.Error)
@@ -85,7 +85,7 @@ func TestCommitPanelGroupsStageCommitAmendAndDiscard(t *testing.T) {
 	if err := driver.Type("amended subject"); err != nil {
 		t.Fatal(err)
 	}
-	clickLowest(t, driver, "Commit")
+	clickControl(t, driver, "Commit changes")
 	m.workers.Wait()
 	m.applyPending()
 	if err := driver.Pump(); err != nil {
@@ -148,7 +148,7 @@ func TestEmptyCommitMessageIsBlocked(t *testing.T) {
 	if !hasLabel(driver, "a.txt") {
 		t.Fatalf("file missing: %v entries=%+v err=%s", labelValues(driver), m.commit.Entries, m.commit.Error)
 	}
-	clickLowest(t, driver, "Commit")
+	clickControl(t, driver, "Commit changes")
 	if err := driver.Pump(); err != nil {
 		t.Fatal(err)
 	}
@@ -202,27 +202,6 @@ func clickNearLabel(t *testing.T, driver *viva.Driver, fileLabel, action string)
 	}
 	if best == nil || bestDist > 40 {
 		t.Fatalf("no %q near %q (dist %v)", action, fileLabel, bestDist)
-	}
-	if err := driver.Click(best.X+best.Width/2, best.Y+best.Height/2); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func clickLowest(t *testing.T, driver *viva.Driver, label string) {
-	t.Helper()
-	var best *gfx.Rect
-	for i := range driver.Snapshot().Hits {
-		hit := &driver.Snapshot().Hits[i]
-		if hit.Label != label {
-			continue
-		}
-		if best == nil || hit.Bounds.Y > best.Y {
-			r := hit.Bounds
-			best = &r
-		}
-	}
-	if best == nil {
-		t.Fatalf("no control %q", label)
 	}
 	if err := driver.Click(best.X+best.Width/2, best.Y+best.Height/2); err != nil {
 		t.Fatal(err)

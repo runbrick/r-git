@@ -47,7 +47,7 @@ func TestEditStageCommitAppearsInLog(t *testing.T) {
 	a.waitFor("Staged")
 	a.click("textfield:Commit message")
 	a.typeText("record the notes")
-	a.clickLowest("Commit")
+	a.click("Commit changes")
 	a.waitFor("No changes")
 
 	log := f.git(t, "log", "--oneline")
@@ -57,6 +57,8 @@ func TestEditStageCommitAppearsInLog(t *testing.T) {
 	if status := f.git(t, "status", "--porcelain"); status != "" {
 		t.Fatalf("working tree not clean:\n%s", status)
 	}
+	a.click("Commit")
+	a.command(`expect absent "Commit changes"`)
 	a.click("Commit")
 	a.waitFor("No changes")
 }
@@ -86,10 +88,10 @@ func TestCreateBranchCommitAndPush(t *testing.T) {
 	a.waitFor("Staged")
 	a.click("textfield:Commit message")
 	a.typeText("topic work")
-	a.clickLowest("Commit")
+	a.click("Commit changes")
 	a.waitFor("No changes")
 
-	a.clickToolbar("Push")
+	a.click("Push")
 	a.waitFor("Push commits")
 	a.click("checkbox:topic")
 	a.click("Push commits")
@@ -128,7 +130,7 @@ func TestPullRebaseShowsLinearHistory(t *testing.T) {
 
 	a := f.open(t)
 	a.waitFor("initial history entry")
-	a.clickToolbar("Pull")
+	a.click("Pull")
 	a.waitFor("Pull")
 	a.click("Rebase")
 	a.click("Pull now")
@@ -167,29 +169,29 @@ func TestMergeConflictResolveAndCommit(t *testing.T) {
 	a.click("Branch actions")
 	a.click("Merge into current")
 	a.waitFor("Merge conflicts in side")
-	a.clickToolbar("Conflicts")
+	a.click("Conflicts")
 	a.waitFor("Close conflicts")
 	a.clickWhenEnabled("conflict.txt")
 	a.waitFor("ours first")
-	a.clickWhenEnabled("Accept Theirs")
-	a.waitFor("theirs first")
+	a.clickWhenEnabled("Accept Theirs 1")
+	a.clickWhenEnabled("Accept Yours 2")
 	a.clickWhenEnabled("Mark resolved")
 	a.waitFor("Select a conflicted file")
 	a.click("Close conflicts")
-	a.clickToolbar("Commit")
+	a.click("Commit")
 	a.waitFor("Describe the change")
 
 	a.click("textfield:Commit message")
 	a.typeText("resolve the conflict")
 	before := strings.TrimSpace(f.git(t, "rev-parse", "HEAD"))
-	a.clickLowest("Commit")
+	a.click("Commit changes")
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) && strings.TrimSpace(f.git(t, "rev-parse", "HEAD")) == before {
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	got := f.read(t, "conflict.txt")
-	want := "theirs first\nkeep 1\nkeep 2\nkeep 3\nkeep 4\ntheirs last\n"
+	want := "theirs first\nkeep 1\nkeep 2\nkeep 3\nkeep 4\nours last\n"
 	if got != want {
 		t.Fatalf("resolved content:\n%s\nwant:\n%s", got, want)
 	}
@@ -212,20 +214,30 @@ func TestStashAndPopAroundCheckout(t *testing.T) {
 	a := f.open(t)
 	a.waitFor("initial history entry")
 	a.click("Open stash")
-	a.waitFor("Save stash")
+	a.command(`expect exists "Save stash" within 45000`)
 	a.click("textfield:Message")
 	a.typeText("keep this")
-	a.clickLowest("Save stash")
-	a.waitFor("stash@")
+	a.click("Save stash")
+	a.waitFor("stash@{0}  keep this")
 	if body := f.read(t, "base.txt"); body != "base\n" {
 		t.Fatalf("file after stash = %q\n%s", body, a.textDump())
 	}
 
-	f.git(t, "checkout", "-q", "other")
-	f.git(t, "checkout", "-q", main)
-	a.clickLowest("Pop")
+	a.click("Close stash")
+	a.command(`expect absent "Close stash"`)
+	a.click("other")
+	a.click("Branch actions")
+	a.click("Checkout")
+	a.waitFor("other (current)")
+	a.click(main)
+	a.click("Branch actions")
+	a.click("Checkout")
+	a.waitFor(main + " (current)")
+	a.click("Open stash")
+	a.command(`expect exists "Save stash" within 45000`)
+	a.click("Pop")
 	a.waitFor("Pop now")
-	a.clickLowest("Pop now")
+	a.click("Pop now")
 	a.waitFor("No stashes.")
 
 	if body := f.read(t, "base.txt"); body != "wip\n" {
@@ -249,7 +261,7 @@ func TestInteractiveRebaseSquash(t *testing.T) {
 	a.click("Load commits")
 	a.waitFor("Move up 2")
 	a.click("combobox:Action 2")
-	a.clickLowest("squash")
+	a.click("squash")
 	a.click("Start rebase")
 	a.waitFor("2 commits")
 
@@ -271,4 +283,38 @@ func writeFile(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestSmartCheckoutKeepsConflictingStash(t *testing.T) {
+	f := newFixture(t)
+	f.write("base.txt", "base\n")
+	f.commit(t, "initial history entry")
+	main := strings.TrimSpace(f.git(t, "branch", "--show-current"))
+	f.git(t, "checkout", "-qb", "other")
+	f.write("base.txt", "destination\n")
+	f.commit(t, "destination edit")
+	f.git(t, "checkout", "-q", main)
+	f.write("base.txt", "local work\n")
+	a := f.open(t)
+	a.waitFor("initial history entry")
+	a.click("other")
+	a.click("Branch actions")
+	a.click("Checkout")
+	a.waitFor("Stash and checkout")
+	a.click("Stash and checkout")
+	a.waitFor("stash kept")
+	a.waitFor("other (current)")
+	if got := strings.TrimSpace(f.git(t, "branch", "--show-current")); got != "other" {
+		t.Fatalf("current branch %q", got)
+	}
+	if got := f.git(t, "show", "stash@{0}:base.txt"); got != "local work\n" {
+		t.Fatalf("saved work %q", got)
+	}
+	if status := f.git(t, "status", "--porcelain"); !strings.Contains(status, "UU base.txt") {
+		t.Fatalf("unmerged state %q", status)
+	}
+	a.click("Open stash")
+	a.command(`expect exists "Save stash" within 45000`)
+	a.key("escape")
+	a.command(`expect absent "Close stash"`)
 }

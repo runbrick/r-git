@@ -159,23 +159,23 @@ func (p *Panel) Page(c ui.C) Request {
 	ui.Column(c).Fill().Gap(8).Pad(8).Children(func() {
 		ui.Text(c, "Branches").Bold()
 		ui.TextField(c, &p.Filter, "Find branch", "Type to filter")
-		ui.Row(c).FillWidth().Gap(4).Children(func() {
-			if ui.Button(c, "Fetch").Clicked() {
-				c.After(func() { req.Action = ActionFetch })
+		ui.Column(c).FillWidth().Gap(4).Children(func() {
+			if ui.Button(c, "Fetch remote").Clicked() {
+				req.Action = ActionFetch
 			}
-			if ui.Button(c, "Pull").Clicked() {
-				c.After(func() { req.Action = ActionPull })
+			if ui.Button(c, "Pull changes").Clicked() {
+				req.Action = ActionPull
 			}
-			if ui.Button(c, "Push").Clicked() {
-				c.After(func() { req.Action = ActionPush })
+			if ui.Button(c, "Push branches").Clicked() {
+				req.Action = ActionPush
 			}
 		})
 		ui.Row(c).FillWidth().Gap(4).Children(func() {
 			if ui.Button(c, "Stash").Clicked() {
-				c.After(func() { req.Action = ActionStash })
+				req.Action = ActionStash
 			}
 			if ui.Button(c, "Remotes").Clicked() {
-				c.After(func() { req.Action = ActionRemotes })
+				req.Action = ActionRemotes
 			}
 		})
 		if p.Error != "" {

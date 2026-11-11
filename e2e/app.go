@@ -30,8 +30,6 @@ type app struct {
 	stderr *bytes.Buffer
 	repo   string
 	home   string
-	width  float64
-	height float64
 }
 
 func startApp(t *testing.T, repo, home, configDir string) *app {
@@ -172,31 +170,11 @@ func (a *app) roundTrip(line string) ([]string, error) {
 	if _, err := io.WriteString(a.stdin, line+"\n"); err != nil {
 		return nil, err
 	}
-	data, status, err := a.readReply()
+	data, _, err := a.readReply()
 	if err != nil {
 		return data, err
 	}
-	if w, h, ok := parseSize([]string{status}); ok {
-		a.width, a.height = w, h
-	}
 	return data, nil
-}
-
-func parseSize(lines []string) (float64, float64, bool) {
-	for _, line := range lines {
-		for _, token := range strings.Fields(line) {
-			width, height, ok := strings.Cut(token, "x")
-			if !ok || strings.Contains(width, "=") {
-				continue
-			}
-			w, werr := strconv.ParseFloat(width, 64)
-			h, herr := strconv.ParseFloat(height, 64)
-			if werr == nil && herr == nil && w > 0 && h > 0 {
-				return w, h, true
-			}
-		}
-	}
-	return 0, 0, false
 }
 
 func (a *app) readReply() ([]string, string, error) {
@@ -243,177 +221,9 @@ func (a *app) safeTexts() []string {
 	return data
 }
 
-// clickCovered clicks the center of label even when a dialog covers it.
-func (a *app) clickCovered(label string) {
-	a.t.Helper()
-	for _, line := range a.command("tree") {
-		if quotedField(line, "label=") != label {
-			continue
-		}
-		id := field(line, "id=")
-		if id == "" {
-			continue
-		}
-		a.clickAt(id)
-		return
-	}
-	a.t.Fatalf("no control %q\n%s", label, strings.Join(a.command("tree"), "\n"))
-}
-
 func (a *app) click(label string) {
 	a.t.Helper()
 	a.command("click " + quote(label))
-}
-
-// clickForm clicks the uncovered control whose label matches and whose
-// identity is inside the page body, not the toolbar. Toolbar and body both
-// paint Commit.
-func (a *app) clickForm(label string) {
-	a.t.Helper()
-	var fallback string
-	for _, line := range a.command("tree") {
-		if !strings.Contains(line, "label="+strconv.Quote(label)) || strings.Contains(line, "covered") {
-			continue
-		}
-		id := field(line, "id=")
-		if strings.Contains(id, "/#0/#0/") {
-			fallback = id
-			continue
-		}
-		a.clickID(id)
-		return
-	}
-	if fallback != "" {
-		a.clickID(fallback)
-		return
-	}
-	a.t.Fatalf("no form control %q\n%s", label, strings.Join(a.command("tree"), "\n"))
-}
-
-// clickLowest clicks the uncovered control with label that is painted
-// furthest down. A toolbar button and a form button can share a label;
-// the form is below the toolbar.
-func (a *app) clickLowest(label string) {
-	a.t.Helper()
-	bestID := ""
-	bestY := -1.0
-	for _, line := range a.command("tree") {
-		if !strings.Contains(line, "label="+strconv.Quote(label)) || strings.Contains(line, "covered") || strings.Contains(line, "disabled") {
-			continue
-		}
-		id := field(line, "id=")
-		y := numberField(line, "y=")
-		if id == "" || y < 0 {
-			continue
-		}
-		if y > bestY {
-			bestY = y
-			bestID = id
-		}
-	}
-	if bestID == "" {
-		a.t.Fatalf("no control %q\n%s", label, strings.Join(a.command("tree"), "\n"))
-	}
-	a.clickAt(bestID)
-}
-
-// clickAt clicks the center of a control from its tree line, which reaches
-// a button that a label selector misses when another control shares the name.
-func (a *app) clickAt(id string) {
-	a.t.Helper()
-	for _, line := range a.command("tree") {
-		if field(line, "id=") != id {
-			continue
-		}
-		x := numberField(line, "x=")
-		y := numberField(line, "y=")
-		w := numberField(line, "w=")
-		h := numberField(line, "h=")
-		if x < 0 || y < 0 || w <= 0 || h <= 0 {
-			a.t.Fatalf("bad bounds %q", line)
-		}
-		point := fmt.Sprintf("click %g %g", x+w/2, y+h/2)
-		a.command(point)
-		return
-	}
-	a.t.Fatalf("id %s not in tree", id)
-}
-
-func (a *app) clickID(id string) {
-	a.t.Helper()
-	a.command("click " + quote("id:"+id))
-}
-
-// clickToolbar clicks the uncovered control with label. The side panel
-// repeats Fetch, Pull, and Push under the toolbar, and a plain click finds
-// the covered copy.
-func (a *app) clickToolbar(label string) {
-	a.t.Helper()
-	for _, line := range a.command("tree") {
-		if !strings.Contains(line, "label="+strconv.Quote(label)) {
-			continue
-		}
-		if strings.Contains(line, "covered") {
-			continue
-		}
-		id := field(line, "id=")
-		if id == "" {
-			continue
-		}
-		a.clickID(id)
-		return
-	}
-	a.t.Fatalf("no uncovered control %q\n%s", label, strings.Join(a.command("tree"), "\n"))
-}
-
-func field(line, key string) string {
-	start := strings.Index(line, key)
-	if start < 0 {
-		return ""
-	}
-	rest := line[start+len(key):]
-	end := strings.IndexByte(rest, ' ')
-	if end < 0 {
-		return rest
-	}
-	return rest[:end]
-}
-
-// quotedField reads key"value" from a tree line.
-func quotedField(line, key string) string {
-	start := strings.Index(line, key+"\"")
-	if start < 0 {
-		return ""
-	}
-	rest := line[start+len(key):]
-	value, err := strconv.Unquote(rest)
-	if err != nil {
-		end := strings.LastIndex(rest, "\"")
-		if end < 1 {
-			return ""
-		}
-		value, err = strconv.Unquote(rest[:end+1])
-		if err != nil {
-			return ""
-		}
-	}
-	return value
-}
-
-// numberField reads a "key=number" token. A bare key search would match the
-// key inside another token, such as w= inside id=.
-func numberField(line, key string) float64 {
-	for _, token := range strings.Fields(line) {
-		if !strings.HasPrefix(token, key) {
-			continue
-		}
-		value, err := strconv.ParseFloat(strings.TrimPrefix(token, key), 64)
-		if err != nil {
-			return -1
-		}
-		return value
-	}
-	return -1
 }
 
 func (a *app) typeText(text string) {
@@ -431,20 +241,6 @@ func (a *app) key(spec string) {
 // that read takes longer than five seconds on a cold CI runner. The match is
 // a substring, so a needle that is part of a label already on screen returns
 // immediately.
-func (a *app) waitGone(needle string) {
-	a.t.Helper()
-	deadline := time.Now().Add(45 * time.Second)
-	var last string
-	for time.Now().Before(deadline) {
-		if !a.contains(needle) {
-			return
-		}
-		last = a.textDump()
-		time.Sleep(25 * time.Millisecond)
-	}
-	a.t.Fatalf("wait for %q to leave: still on screen\n%s", needle, last)
-}
-
 func (a *app) waitFor(needle string) {
 	a.t.Helper()
 	a.command("waitfor " + quote(needle) + " 45000")
@@ -487,44 +283,12 @@ func unquoteText(line string) string {
 	return value
 }
 
-// clickWhenEnabled clicks label once the tree shows it enabled and fully
-// inside the window. The click uses that control's id, because a label click
-// can land on a disabled copy. A button painted past the window edge answers
-// the tree as enabled and the coordinate click misses it.
+// clickWhenEnabled waits for asynchronous loading to enable a named control,
+// then takes the same label path a user takes. Labels are unique in the shell.
 func (a *app) clickWhenEnabled(label string) {
 	a.t.Helper()
-	_, height := a.windowSize()
-	deadline := time.Now().Add(45 * time.Second)
-	var last []string
-	for time.Now().Before(deadline) {
-		last = a.safeTree()
-		for _, line := range last {
-			if quotedField(line, "label=") != label || strings.Contains(field(line, "state="), "disabled") {
-				continue
-			}
-			id := field(line, "id=")
-			y := numberField(line, "y=")
-			h := numberField(line, "h=")
-			if id == "" || y < 0 || h <= 0 || y+h > height {
-				continue
-			}
-			a.clickAt(id)
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	a.t.Fatalf("wait for control %q inside the %g tall window: not enabled within 45s\n%s", label, height, strings.Join(last, "\n"))
-}
-
-func (a *app) windowSize() (float64, float64) {
-	a.t.Helper()
-	if _, err := a.roundTrip("size"); err != nil {
-		a.t.Fatal(err)
-	}
-	if a.width <= 0 || a.height <= 0 {
-		a.t.Fatal("size reply has no window")
-	}
-	return a.width, a.height
+	a.command("expect state " + quote(label) + " enabled reachable within 45000")
+	a.click(label)
 }
 
 func quote(value string) string {
