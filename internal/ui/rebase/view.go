@@ -15,7 +15,7 @@ var errPreview = errors.New("rebase preview captured")
 var ErrHistoryChanged = errors.New("rebase history changed; load the commits again")
 
 // Prepare asks Git for the real todo and cancels in the editor, before changes.
-func Prepare(ctx context.Context, o ops.Operations, upstream string) ([]ops.RebaseEntry, error) {
+func Prepare(ctx context.Context, o *ops.Service, upstream string) ([]ops.RebaseEntry, error) {
 	var entries []ops.RebaseEntry
 	r := o.InteractiveRebase(ctx, upstream, func(todo []ops.RebaseEntry) ([]ops.RebaseEntry, error) {
 		entries = append([]ops.RebaseEntry(nil), todo...)
@@ -32,7 +32,7 @@ func Prepare(ctx context.Context, o ops.Operations, upstream string) ([]ops.Reba
 
 // Apply rechecks the captured plan, so HEAD changes cannot silently rewrite a
 // different set of commits than those the user reviewed.
-func Apply(ctx context.Context, o ops.Operations, upstream string, original, edited []ops.RebaseEntry) ops.RebaseResult {
+func Apply(ctx context.Context, o *ops.Service, upstream string, original, edited []ops.RebaseEntry) ops.RebaseResult {
 	return o.InteractiveRebase(ctx, upstream, func(todo []ops.RebaseEntry) ([]ops.RebaseEntry, error) {
 		if len(todo) != len(original) {
 			return nil, ErrHistoryChanged

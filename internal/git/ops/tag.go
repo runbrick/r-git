@@ -7,13 +7,10 @@ import (
 	"github.com/runbrick/r-git/internal/git/command"
 )
 
-// Tag creates and deletes tags.
-type Tag struct{ *Service }
-
-// Create creates name at revision (git tag <name> <revision>).
+// CreateTag creates name at revision (git tag <name> <revision>).
 // An empty revision tags HEAD, matching GitImpl.createNewTag when the
 // reference is empty. The tag hash (the tagged commit) is returned.
-func (t Tag) Create(ctx context.Context, name, revision string) (string, error) {
+func (t *Service) CreateTag(ctx context.Context, name, revision string) (string, error) {
 	args := []string{name}
 	if revision != "" {
 		args = append(args, revision)
@@ -34,8 +31,8 @@ func (t Tag) Create(ctx context.Context, name, revision string) (string, error) 
 	return strings.TrimSpace(string(res.Stdout)), nil
 }
 
-// Delete removes the tag name (git tag -d <name>).
-func (t Tag) Delete(ctx context.Context, name string) error {
+// DeleteTag removes the tag name (git tag -d <name>).
+func (t *Service) DeleteTag(ctx context.Context, name string) error {
 	_, err := t.run(ctx, "tag", "-d", name)
 	return err
 }

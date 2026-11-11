@@ -16,7 +16,7 @@ func TestAddOneFile(t *testing.T) {
 	repo.Commit("init")
 	repo.WriteFile("b.txt", "b\n")
 
-	if err := (Index{Service: svc}).Stage(context.Background(), []string{"b.txt"}); err != nil {
+	if err := svc.Stage(context.Background(), []string{"b.txt"}); err != nil {
 		t.Fatal(err)
 	}
 	staged := repo.Git("diff", "--cached", "--name-only")
@@ -33,7 +33,7 @@ func TestAddDirectory(t *testing.T) {
 	repo.WriteFile("dir/one.txt", "1\n")
 	repo.WriteFile("dir/two.txt", "2\n")
 
-	if err := (Index{Service: svc}).Stage(context.Background(), []string{"dir"}); err != nil {
+	if err := svc.Stage(context.Background(), []string{"dir"}); err != nil {
 		t.Fatal(err)
 	}
 	staged := strings.TrimSpace(repo.Git("diff", "--cached", "--name-only"))
@@ -51,7 +51,7 @@ func TestUnstage(t *testing.T) {
 	repo.WriteFile("a.txt", "changed\n")
 	repo.Git("add", "a.txt")
 
-	if err := (Index{Service: svc}).Unstage(context.Background(), []string{"a.txt"}); err != nil {
+	if err := svc.Unstage(context.Background(), []string{"a.txt"}); err != nil {
 		t.Fatal(err)
 	}
 	cached := strings.TrimSpace(repo.Git("diff", "--cached", "--name-only"))
@@ -71,7 +71,7 @@ func TestDiscardTrackedChanges(t *testing.T) {
 	repo.Commit("init")
 	repo.WriteFile("a.txt", "dirty\n")
 
-	if err := (Index{Service: svc}).Discard(context.Background(), []string{"a.txt"}); err != nil {
+	if err := svc.Discard(context.Background(), []string{"a.txt"}); err != nil {
 		t.Fatal(err)
 	}
 	if fileText(t, repo, "a.txt") != "a\n" {
@@ -89,7 +89,7 @@ func TestDiscardUntrackedRemovesTheFile(t *testing.T) {
 	repo.WriteFile("new.txt", "new\n")
 	repo.WriteFile("ignored.txt", "keep\n")
 
-	if err := (Index{Service: svc}).Discard(context.Background(), []string{"new.txt", "ignored.txt"}); err != nil {
+	if err := svc.Discard(context.Background(), []string{"new.txt", "ignored.txt"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(repo.Dir, "new.txt")); !os.IsNotExist(err) {
@@ -109,7 +109,7 @@ func TestDiscardAddedFile(t *testing.T) {
 	repo.WriteFile("new.txt", "new\n")
 	repo.Git("add", "new.txt")
 
-	if err := (Index{Service: svc}).Discard(context.Background(), []string{"new.txt"}); err != nil {
+	if err := svc.Discard(context.Background(), []string{"new.txt"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(repo.Dir, "new.txt")); !os.IsNotExist(err) {

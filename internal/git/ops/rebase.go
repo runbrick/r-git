@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/runbrick/r-git/internal/git/command"
 )
 
 type RebaseOptions struct {
@@ -17,7 +19,7 @@ type RebaseOptions struct {
 	UpdateRefs     bool
 }
 
-func (o Operations) Rebase(ctx context.Context, upstream string, options RebaseOptions) RebaseResult {
+func (o *Service) Rebase(ctx context.Context, upstream string, options RebaseOptions) RebaseResult {
 	args := []string{}
 	if options.Interactive {
 		args = append(args, "-i")
@@ -36,11 +38,12 @@ func (o Operations) Rebase(ctx context.Context, upstream string, options RebaseO
 	}
 	args = append(args, upstream)
 	res, err := o.run(ctx, "rebase", args...)
+	err = classify(res, err, command.Merge, "rebase")
 	if err == nil {
 		return RebaseResult{Outcome: OutcomeDone}
 	}
 	out := append(res.Stdout, res.Stderr...)
-	if isConflict(err, out) {
+	if err == ErrConflict {
 		conflicts, _ := o.Conflicts(ctx)
 		return RebaseResult{Outcome: OutcomeConflicts, Conflicts: conflicts}
 	}
@@ -51,13 +54,13 @@ func (o Operations) Rebase(ctx context.Context, upstream string, options RebaseO
 	if strings.Contains(text, "stopped at") || strings.Contains(text, "editing") || strings.Contains(text, "reword") {
 		return RebaseResult{Outcome: OutcomeStopped, StoppedAction: strings.TrimSpace(string(out))}
 	}
-	return RebaseResult{Outcome: OutcomeError, Err: opError("rebase", err)}
+	return RebaseResult{Outcome: OutcomeError, Err: err}
 }
 
 // InteractiveRebase captures Git's generated todo, applies edit, then runs the
 // rebase again with the edited todo. The first invocation stops in the editor
 // before Git can change HEAD or the worktree.
-func (o Operations) InteractiveRebase(ctx context.Context, onto string, edit func([]RebaseEntry) ([]RebaseEntry, error)) RebaseResult {
+func (o *Service) InteractiveRebase(ctx context.Context, onto string, edit func([]RebaseEntry) ([]RebaseEntry, error)) RebaseResult {
 	if err := ctx.Err(); err != nil {
 		return RebaseResult{Outcome: OutcomeError, Err: err}
 	}
@@ -66,12 +69,12 @@ func (o Operations) InteractiveRebase(ctx context.Context, onto string, edit fun
 		var err error
 		executable, err = os.Executable()
 		if err != nil {
-			return RebaseResult{Outcome: OutcomeError, Err: opError("locate r-git editor", err)}
+			return RebaseResult{Outcome: OutcomeError, Err: fmt.Errorf("locate r-git editor: %w", err)}
 		}
 	}
 	tempDir, err := os.MkdirTemp("", "r-git-rebase-editor-*")
 	if err != nil {
-		return RebaseResult{Outcome: OutcomeError, Err: opError("create rebase editor files", err)}
+		return RebaseResult{Outcome: OutcomeError, Err: fmt.Errorf("create rebase editor files: %w", err)}
 	}
 	defer os.RemoveAll(tempDir)
 	todoPath := filepath.Join(tempDir, "todo")
@@ -130,14 +133,15 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-func classifyRebaseFailure(ctx context.Context, o Operations, err error, output []byte) RebaseResult {
+func classifyRebaseFailure(ctx context.Context, o *Service, err error, output []byte) RebaseResult {
 	if err == nil {
 		return RebaseResult{Outcome: OutcomeDone}
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return RebaseResult{Outcome: OutcomeError, Err: err}
 	}
-	if isConflict(err, output) {
+	err = classify(command.Result{Stdout: output}, err, command.Merge, "interactive rebase")
+	if err == ErrConflict {
 		conflicts, _ := o.Conflicts(ctx)
 		return RebaseResult{Outcome: OutcomeConflicts, Conflicts: conflicts}
 	}
@@ -145,27 +149,28 @@ func classifyRebaseFailure(ctx context.Context, o Operations, err error, output 
 	if strings.Contains(text, "nothing to do") || strings.Contains(text, "up to date") {
 		return RebaseResult{Outcome: OutcomeNothingToDo}
 	}
-	return RebaseResult{Outcome: OutcomeError, Err: opError("interactive rebase", err)}
+	return RebaseResult{Outcome: OutcomeError, Err: err}
 }
 
 // ContinueRebase resumes after conflicts or an edit stop.
-func (o Operations) ContinueRebase(ctx context.Context) RebaseResult {
+func (o *Service) ContinueRebase(ctx context.Context) RebaseResult {
 	return o.rebaseControl(ctx, "--continue")
 }
-func (o Operations) SkipRebase(ctx context.Context) RebaseResult {
+func (o *Service) SkipRebase(ctx context.Context) RebaseResult {
 	return o.rebaseControl(ctx, "--skip")
 }
-func (o Operations) AbortRebase(ctx context.Context) RebaseResult {
+func (o *Service) AbortRebase(ctx context.Context) RebaseResult {
 	return o.rebaseControl(ctx, "--abort")
 }
-func (o Operations) rebaseControl(ctx context.Context, action string) RebaseResult {
+func (o *Service) rebaseControl(ctx context.Context, action string) RebaseResult {
 	res, err := o.runWithEnv(ctx, "rebase", map[string]string{"GIT_EDITOR": "true"}, action)
+	err = classify(res, err, command.Merge, "rebase "+strings.TrimPrefix(action, "--"))
 	if err == nil {
 		return RebaseResult{Outcome: OutcomeDone}
 	}
-	if isConflict(err, append(res.Stdout, res.Stderr...)) {
+	if err == ErrConflict {
 		conflicts, _ := o.Conflicts(ctx)
 		return RebaseResult{Outcome: OutcomeConflicts, Conflicts: conflicts}
 	}
-	return RebaseResult{Outcome: OutcomeError, Err: opError("rebase "+strings.TrimPrefix(action, "--"), err)}
+	return RebaseResult{Outcome: OutcomeError, Err: err}
 }

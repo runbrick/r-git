@@ -212,10 +212,10 @@ func TestPushOperation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pusher := ops.NewPusher(runner)
+	pusher := ops.New(runner, localDir)
 
 	// Test basic push
-	res, err := pusher.Push(ctx, localDir, "origin", "refs/heads/master:refs/heads/master", false, false)
+	res, err := pusher.Push(ctx, "origin", "refs/heads/master:refs/heads/master", false, false)
 	if err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}

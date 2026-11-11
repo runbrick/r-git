@@ -17,7 +17,7 @@ func TestStashSaveAndList(t *testing.T) {
 	repo.Commit("init")
 	repo.WriteFile("a.txt", "dirty\n")
 
-	hash, err := Stash{svc}.Save(context.Background(), StashSaveOptions{Message: "wip"})
+	hash, err := svc.SaveStash(context.Background(), StashSaveOptions{Message: "wip"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestStashIncludeUntracked(t *testing.T) {
 	repo.Commit("init")
 	repo.WriteFile("new.txt", "new\n")
 
-	if _, err := (Stash{Service: svc}).Save(context.Background(), StashSaveOptions{Message: "with new", IncludeUntracked: true}); err != nil {
+	if _, err := svc.SaveStash(context.Background(), StashSaveOptions{Message: "with new", IncludeUntracked: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.GitAllowError("cat-file", "-e", "HEAD:new.txt"); err == nil {
@@ -49,7 +49,7 @@ func TestStashIncludeUntracked(t *testing.T) {
 	if strings.Contains(repo.Git("status", "--porcelain"), "new.txt") {
 		t.Fatalf("untracked file was not stashed: %s", repo.Git("status", "--porcelain"))
 	}
-	patch, err := Stash{svc}.Show(context.Background(), "stash@{0}")
+	patch, err := svc.ShowStash(context.Background(), "stash@{0}")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestStashIncludeUntracked(t *testing.T) {
 	// commit is the third parent; confirm the file is gone from the tree
 	// and comes back on pop.
 	_ = patch
-	if err := (Stash{Service: svc}).Pop(context.Background(), ""); err != nil {
+	if err := svc.PopStash(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
 	if fileText(t, repo, "new.txt") != "new\n" {
@@ -76,7 +76,7 @@ func TestStashKeepIndex(t *testing.T) {
 	repo.Git("add", "a.txt")
 	repo.WriteFile("b.txt", "B\n")
 
-	if _, err := (Stash{Service: svc}).Save(context.Background(), StashSaveOptions{Message: "keep", KeepIndex: true}); err != nil {
+	if _, err := svc.SaveStash(context.Background(), StashSaveOptions{Message: "keep", KeepIndex: true}); err != nil {
 		t.Fatal(err)
 	}
 	if fileText(t, repo, "a.txt") != "A\n" {
@@ -93,15 +93,15 @@ func TestStashPopAndApply(t *testing.T) {
 	repo.WriteFile("a.txt", "a\n")
 	repo.Commit("init")
 	repo.WriteFile("a.txt", "one\n")
-	if _, err := (Stash{Service: svc}).Save(context.Background(), StashSaveOptions{Message: "one"}); err != nil {
+	if _, err := svc.SaveStash(context.Background(), StashSaveOptions{Message: "one"}); err != nil {
 		t.Fatal(err)
 	}
 	repo.WriteFile("a.txt", "two\n")
-	if _, err := (Stash{Service: svc}).Save(context.Background(), StashSaveOptions{Message: "two"}); err != nil {
+	if _, err := svc.SaveStash(context.Background(), StashSaveOptions{Message: "two"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := (Stash{Service: svc}).Apply(context.Background(), "stash@{1}"); err != nil {
+	if err := svc.ApplyStash(context.Background(), "stash@{1}"); err != nil {
 		t.Fatal(err)
 	}
 	if fileText(t, repo, "a.txt") != "one\n" {
@@ -112,7 +112,7 @@ func TestStashPopAndApply(t *testing.T) {
 	}
 
 	repo.WriteFile("a.txt", "a\n")
-	if err := (Stash{Service: svc}).Pop(context.Background(), "stash@{0}"); err != nil {
+	if err := svc.PopStash(context.Background(), "stash@{0}"); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(repo.Git("stash", "list"), "two") {
@@ -126,18 +126,18 @@ func TestStashDropAndClear(t *testing.T) {
 	repo.WriteFile("a.txt", "a\n")
 	repo.Commit("init")
 	repo.WriteFile("a.txt", "one\n")
-	Stash{svc}.Save(context.Background(), StashSaveOptions{Message: "one"})
+	svc.SaveStash(context.Background(), StashSaveOptions{Message: "one"})
 	repo.WriteFile("a.txt", "two\n")
-	Stash{svc}.Save(context.Background(), StashSaveOptions{Message: "two"})
+	svc.SaveStash(context.Background(), StashSaveOptions{Message: "two"})
 
-	if err := (Stash{Service: svc}).Drop(context.Background(), "stash@{1}"); err != nil {
+	if err := svc.DropStash(context.Background(), "stash@{1}"); err != nil {
 		t.Fatal(err)
 	}
 	list := repo.Git("stash", "list")
 	if strings.Contains(list, "one") || !strings.Contains(list, "two") {
 		t.Fatalf("after drop: %q", list)
 	}
-	if err := (Stash{Service: svc}).Clear(context.Background()); err != nil {
+	if err := svc.ClearStashes(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(repo.Git("stash", "list")) != "" {
@@ -151,14 +151,14 @@ func TestStashPopConflict(t *testing.T) {
 	repo.WriteFile("a.txt", "base\n")
 	repo.Commit("init")
 	repo.WriteFile("a.txt", "stashed\n")
-	if _, err := (Stash{Service: svc}).Save(context.Background(), StashSaveOptions{Message: "s"}); err != nil {
+	if _, err := svc.SaveStash(context.Background(), StashSaveOptions{Message: "s"}); err != nil {
 		t.Fatal(err)
 	}
 	repo.WriteFile("a.txt", "other\n")
 	repo.Git("add", "a.txt")
 	repo.Git("commit", "-q", "-m", "other")
 
-	err := Stash{svc}.Pop(context.Background(), "")
+	err := svc.PopStash(context.Background(), "")
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("got %v, want ErrConflict", err)
 	}

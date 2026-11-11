@@ -18,14 +18,14 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func testOps(t *testing.T) (*testutil.Repo, Operations) {
+func testOps(t *testing.T) (*testutil.Repo, *Service) {
 	t.Helper()
 	repo := testutil.NewRepo(t)
 	runner, err := command.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return repo, Operations{Dir: repo.Dir, Git: runner}
+	return repo, New(runner, repo.Dir)
 }
 
 func TestApplyTodoModelFixupCannotBeFirst(t *testing.T) {
@@ -210,7 +210,7 @@ func TestInteractiveRebaseFixupFirstDoesNotChangeRepo(t *testing.T) {
 	}
 }
 
-func interactiveRepo(t *testing.T) (*testutil.Repo, Operations) {
+func interactiveRepo(t *testing.T) (*testutil.Repo, *Service) {
 	t.Helper()
 	repo, ops := testOps(t)
 	repo.WriteFile("base.txt", "base\n")

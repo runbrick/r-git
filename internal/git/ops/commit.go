@@ -60,7 +60,7 @@ func (s *Service) Commit(ctx context.Context, opts CommitOptions) (model.Hash, e
 	res, err := s.Git.Run(ctx, cmd)
 	removeFile(msgPath)
 	if err != nil {
-		return model.Hash{}, classify(res, err, command.Checkout)
+		return model.Hash{}, classify(res, err, command.Checkout, "")
 	}
 	return s.head(ctx)
 }

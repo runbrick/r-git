@@ -88,7 +88,7 @@ func TestDriverModifiedFileDiffNavigation(t *testing.T) {
 	}
 }
 
-func createConflict(t *testing.T) (*testutil.Repo, ops.Operations) {
+func createConflict(t *testing.T) (*testutil.Repo, *ops.Service) {
 	t.Helper()
 	g := testutil.NewRepo(t)
 	base := "first\nkeep 1\nkeep 2\nkeep 3\nkeep 4\nlast\n"
@@ -105,7 +105,7 @@ func createConflict(t *testing.T) (*testutil.Repo, ops.Operations) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := ops.Operations{Dir: g.Dir, Git: runner}
+	o := ops.New(runner, g.Dir)
 	if result := o.Merge(context.Background(), "side", ops.MergeOptions{}); result.Outcome != ops.OutcomeConflicts {
 		t.Fatalf("merge %#v", result)
 	}

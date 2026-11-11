@@ -10,16 +10,7 @@ import (
 
 var prunePattern = regexp.MustCompile(`\s*x\s*\[deleted\].*->\s*(\S*)`)
 
-type Fetcher struct {
-	runner *command.Runner
-}
-
-func NewFetcher(runner *command.Runner) *Fetcher {
-	return &Fetcher{runner: runner}
-}
-
 type FetchParams struct {
-	RepoPath   string
 	Remotes    []string
 	Refspecs   []string
 	Prune      bool
@@ -28,7 +19,7 @@ type FetchParams struct {
 	OnProgress func(command.Line)
 }
 
-func (f *Fetcher) Fetch(ctx context.Context, params FetchParams) error {
+func (f *Service) Fetch(ctx context.Context, params FetchParams) error {
 	if len(params.Remotes) == 0 {
 		return nil
 	}
@@ -57,15 +48,15 @@ func (f *Fetcher) Fetch(ctx context.Context, params FetchParams) error {
 			cmd := command.Cmd{
 				Subcommand: "fetch",
 				Args:       args,
-				Dir:        params.RepoPath,
+				Dir:        f.Root,
 			}
 
 			if params.OnProgress != nil {
-				_, err := f.runner.Stream(egCtx, cmd, params.OnProgress)
+				_, err := f.Git.Stream(egCtx, cmd, params.OnProgress)
 				return err
 			}
 
-			_, err := f.runner.Run(egCtx, cmd)
+			_, err := f.Git.Run(egCtx, cmd)
 			return err
 		})
 	}

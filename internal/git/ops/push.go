@@ -113,17 +113,9 @@ func parseType(flag string) (PushNativeResultType, bool) {
 	}
 }
 
-type Pusher struct {
-	runner *command.Runner
-}
-
-func NewPusher(runner *command.Runner) *Pusher {
-	return &Pusher{runner: runner}
-}
-
 // Push executes a git push operation. setUpstream sets the local branch's
 // upstream to the pushed remote branch when the refspec is a branch mapping.
-func (p *Pusher) Push(ctx context.Context, repoPath, remote string, refspec string, force, setUpstream bool) ([]PushNativeResult, error) {
+func (p *Service) Push(ctx context.Context, remote string, refspec string, force, setUpstream bool) ([]PushNativeResult, error) {
 	args := []string{"--porcelain"}
 	if force {
 		args = append(args, "--force-with-lease")
@@ -133,13 +125,7 @@ func (p *Pusher) Push(ctx context.Context, repoPath, remote string, refspec stri
 	}
 	args = append(args, remote, refspec)
 
-	cmd := command.Cmd{
-		Subcommand: "push",
-		Args:       args,
-		Dir:        repoPath,
-	}
-
-	res, err := p.runner.Run(ctx, cmd)
+	res, err := p.run(ctx, "push", args...)
 	if err != nil {
 		if _, ok := err.(*command.ExitError); !ok {
 			return nil, err
@@ -148,4 +134,24 @@ func (p *Pusher) Push(ctx context.Context, repoPath, remote string, refspec stri
 
 	lines := strings.Split(string(res.Stdout), "\n")
 	return ParsePushNativeResult(lines), nil
+}
+
+// Ensure PushNativeResultType matches Java enums
+func PushResultToString(t PushNativeResultType) string {
+	switch t {
+	case PushSuccess:
+		return "SUCCESS"
+	case PushForcedUpdate:
+		return "FORCED_UPDATE"
+	case PushNewRef:
+		return "NEW_REF"
+	case PushRejected:
+		return "REJECTED"
+	case PushDeleted:
+		return "DELETED"
+	case PushUpToDate:
+		return "UP_TO_DATE"
+	default:
+		return "ERROR"
+	}
 }

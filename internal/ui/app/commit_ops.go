@@ -31,16 +31,15 @@ func (m *Model) handleCommitRequest(req commitview.Request) {
 		defer m.workers.Done()
 		out := loadResult{kind: resultCommit, generation: generation}
 		service := ops.New(repository.Executor, repository.Path)
-		index := ops.Index{Service: service}
 		switch req.Kind {
 		case commitview.RequestStage:
-			out.err = index.Stage(ctx, req.Paths)
+			out.err = service.Stage(ctx, req.Paths)
 			out.toast = "Staged"
 		case commitview.RequestUnstage:
-			out.err = index.Unstage(ctx, req.Paths)
+			out.err = service.Unstage(ctx, req.Paths)
 			out.toast = "Unstaged"
 		case commitview.RequestDiscard:
-			out.err = index.Discard(ctx, req.Paths)
+			out.err = service.Discard(ctx, req.Paths)
 			out.toast = "Discarded"
 		case commitview.RequestCommit:
 			// Partial commit, matching git4idea: stage only checked paths
@@ -54,7 +53,7 @@ func (m *Model) handleCommitRequest(req commitview.Request) {
 				out.err = statusErr
 				break
 			}
-			if err := index.Stage(ctx, untrackedAmong(req.Paths, status.Changes)); err != nil {
+			if err := service.Stage(ctx, untrackedAmong(req.Paths, status.Changes)); err != nil {
 				out.err = err
 				break
 			}

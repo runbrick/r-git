@@ -45,11 +45,10 @@ func TestFetcher(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	fetcher := ops.NewFetcher(runner)
+	fetcher := ops.New(runner, localDir)
 
 	err = fetcher.Fetch(ctx, ops.FetchParams{
-		RepoPath: localDir,
-		Remotes:  []string{"origin"},
+		Remotes: []string{"origin"},
 	})
 	if err != nil {
 		t.Fatalf("Fetch failed: %v", err)
@@ -77,9 +76,8 @@ func TestFetcher(t *testing.T) {
 	}
 
 	err = fetcher.Fetch(ctx, ops.FetchParams{
-		RepoPath: localDir,
-		Remotes:  []string{"origin"},
-		Prune:    true,
+		Remotes: []string{"origin"},
+		Prune:   true,
 	})
 	if err != nil {
 		t.Fatalf("Fetch with prune failed: %v", err)

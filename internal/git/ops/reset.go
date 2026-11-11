@@ -51,7 +51,7 @@ func (m ResetMode) Argument() string {
 func (s *Service) Reset(ctx context.Context, mode ResetMode, target string) (model.Hash, error) {
 	res, err := s.run(ctx, "reset", mode.Argument(), target)
 	if err != nil {
-		return model.Hash{}, classify(res, err, command.Reset)
+		return model.Hash{}, classify(res, err, command.Reset, "")
 	}
 	return s.head(ctx)
 }
@@ -66,7 +66,7 @@ func (s *Service) ResetWithStash(ctx context.Context, mode ResetMode, target str
 	hash, resetErr := s.Reset(ctx, mode, target)
 	popRes, popErr := s.run(ctx, "stash", "pop")
 	if popErr != nil {
-		popErr = classify(popRes, popErr, command.Merge)
+		popErr = classify(popRes, popErr, command.Merge, "")
 		if resetErr != nil {
 			return hash, resetErr
 		}

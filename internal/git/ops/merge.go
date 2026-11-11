@@ -2,7 +2,10 @@ package ops
 
 import (
 	"context"
+	"fmt"
 	"strings"
+
+	"github.com/runbrick/r-git/internal/git/command"
 )
 
 type MergeOptions struct {
@@ -13,7 +16,7 @@ type MergeOptions struct {
 	Message         string
 }
 
-func (o Operations) Merge(ctx context.Context, target string, options MergeOptions) MergeResult {
+func (o *Service) Merge(ctx context.Context, target string, options MergeOptions) MergeResult {
 	args := make([]string, 0, 8)
 	if options.NoFastForward {
 		args = append(args, "--no-ff")
@@ -32,36 +35,41 @@ func (o Operations) Merge(ctx context.Context, target string, options MergeOptio
 	}
 	args = append(args, "--", target)
 	res, err := o.run(ctx, "merge", args...)
+	err = classify(res, err, command.Merge, "merge")
 	if err == nil {
 		return MergeResult{Outcome: OutcomeDone}
 	}
-	if isConflict(err, append(res.Stdout, res.Stderr...)) {
+	if err == ErrConflict {
 		conflicts, _ := o.Conflicts(ctx)
 		return MergeResult{Outcome: OutcomeConflicts, Conflicts: conflicts}
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "up to date") {
 		return MergeResult{Outcome: OutcomeNothingToDo}
 	}
-	return MergeResult{Outcome: OutcomeError, Err: opError("merge", err)}
+	return MergeResult{Outcome: OutcomeError, Err: err}
 }
 
-func (o Operations) ContinueMerge(ctx context.Context, message string) MergeResult {
+func (o *Service) ContinueMerge(ctx context.Context, message string) MergeResult {
 	args := []string{"--no-edit"}
 	if message != "" {
 		args = []string{"-m", message}
 	}
 	res, err := o.run(ctx, "commit", args...)
+	err = classify(res, err, command.Merge, "continue merge")
 	if err == nil {
 		return MergeResult{Outcome: OutcomeDone}
 	}
-	if isConflict(err, append(res.Stdout, res.Stderr...)) {
+	if err == ErrConflict {
 		conflicts, _ := o.Conflicts(ctx)
 		return MergeResult{Outcome: OutcomeConflicts, Conflicts: conflicts}
 	}
-	return MergeResult{Outcome: OutcomeError, Err: opError("continue merge", err)}
+	return MergeResult{Outcome: OutcomeError, Err: err}
 }
 
-func (o Operations) AbortMerge(ctx context.Context) error {
+func (o *Service) AbortMerge(ctx context.Context) error {
 	_, err := o.run(ctx, "merge", "--abort")
-	return opError("abort merge", err)
+	if err != nil {
+		return fmt.Errorf("abort merge: %w", err)
+	}
+	return nil
 }
