@@ -10,11 +10,13 @@ import (
 	"github.com/runbrick/r-git/internal/git/model"
 )
 
-// LogQuery controls a page of history. Range takes precedence over Branch.
+// LogQuery controls a page of history. Range takes precedence over Branch,
+// which takes precedence over All. With none set, history starts at HEAD.
 type LogQuery struct {
 	MaxCount, Skip int
 	Range, Branch  string
 	Paths          []string
+	All            bool
 }
 
 // CommitParents preserves git log's topological display order while mapping
@@ -39,6 +41,8 @@ func (r *Repo) Log(ctx context.Context, q LogQuery) ([]model.Commit, error) {
 		args = append(args, q.Range)
 	case q.Branch != "":
 		args = append(args, q.Branch)
+	case q.All:
+		args = append(args, "--all")
 	}
 	if len(q.Paths) > 0 {
 		args = append(args, "--")
@@ -153,6 +157,16 @@ func (r *Repo) ParentsOrdered(ctx context.Context, rev string) ([]CommitParents,
 	if rev == "" {
 		rev = "HEAD"
 	}
+	return r.parentsOrdered(ctx, rev)
+}
+
+// ParentsOrderedAll returns topologically ordered history reachable from all
+// refs, using the same revision set as LogQuery.All.
+func (r *Repo) ParentsOrderedAll(ctx context.Context) ([]CommitParents, error) {
+	return r.parentsOrdered(ctx, "--all")
+}
+
+func (r *Repo) parentsOrdered(ctx context.Context, rev string) ([]CommitParents, error) {
 	out, err := r.run(ctx, "log", "--topo-order", "--format=%H %P", rev)
 	if err != nil {
 		return nil, err
