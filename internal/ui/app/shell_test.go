@@ -1,16 +1,101 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/runbrick/r-git/internal/config"
+	"github.com/runbrick/r-git/internal/graph/printer"
 	"github.com/runbrick/r-git/internal/testutil"
 	apptheme "github.com/runbrick/r-git/internal/ui/theme"
 	viva "github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/gfx"
 )
+
+func TestLogRowsMatchGraphAndHeadsHaveNoUpwardEdge(t *testing.T) {
+	g := testutil.NewDateSkewedHistory(t)
+	m, d := openDriver(t, g.Dir)
+	waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading && len(m.log.Commits) == 6 })
+	ordered, err := m.repo.ParentsOrderedAll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.log.Commits[0].Subject != "Start UI work" {
+		t.Fatalf("unexpected first row %q", m.log.Commits[0].Subject)
+	}
+	for i := range ordered {
+		commit, ok := m.log.VisibleCommit(i)
+		if !ok {
+			t.Fatalf("missing display row %d", i)
+		}
+		graphRow := m.log.GraphIndex[commit.Hash]
+		cell := m.log.Graph.Row(graphRow)
+		if graphRow != i || len(cell.Nodes) != 1 || !commit.Hash.Equal(ordered[cell.Nodes[0].NodeIndex].Commit) {
+			t.Fatalf("display row %d (%s) does not match graph row %d (%+v)", i, commit.Hash, graphRow, cell)
+		}
+		for _, edge := range cell.Edges {
+			if i == 0 && edge.EdgePrintType == printer.EdgeUp {
+				t.Fatalf("first row has an upward edge: %+v", edge)
+			}
+		}
+	}
+	// Filtering keeps each displayed commit's own topological cell.
+	m.log.SetFilter("Login returns bool")
+	commit, ok := m.log.VisibleCommit(0)
+	if !ok || commit.Subject != "Login returns bool" || m.log.GraphIndex[commit.Hash] == 0 {
+		t.Fatal("filter must retain the selected commit's graph identity")
+	}
+}
+
+func TestLogToolbarTextFitsAtWindowWidths(t *testing.T) {
+	g := testutil.NewDateSkewedHistory(t)
+	m, d := openDriver(t, g.Dir)
+	waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading })
+	for _, width := range []int{1200, 1400, 1600} {
+		for _, date := range []string{"Any date", "Before today", "Last 30 days"} {
+			t.Run(fmt.Sprintf("%d/%s", width, date), func(t *testing.T) {
+				m.log.Date = date
+				if err := d.Resize(width, 900); err != nil {
+					t.Fatal(err)
+				}
+				s := d.Snapshot()
+				for _, tc := range []struct{ control, text string }{
+					{"Filter", "Text or hash"}, {"Regex", ".*"}, {"Match case", "Cc"},
+					{"Branch", "All branches"}, {"User", "User"}, {"Date", date},
+				} {
+					var bounds gfx.Rect
+					for _, hit := range s.Hits {
+						if hit.Label == tc.control {
+							bounds = hit.Bounds
+							break
+						}
+					}
+					found := false
+					for i, text := range s.Texts {
+						if text.Value != tc.text || text.Bounds.Y < bounds.Y || text.Bounds.Y >= bounds.Y+bounds.Height {
+							continue
+						}
+						found = true
+						if s.TextWidths[i] > text.Bounds.Width+0.5 || text.Bounds.X < bounds.X || text.Bounds.X+s.TextWidths[i] > bounds.X+bounds.Width+0.5 {
+							t.Errorf("%s text needs %.1fpx, text bounds %v, control %v", tc.control, s.TextWidths[i], text.Bounds, bounds)
+						}
+						if text.Bounds.X+s.TextWidths[i] > float32(width) {
+							t.Errorf("%s extends past window", tc.control)
+						}
+						if text.HasClip && (text.Bounds.X < text.ClipOf.X || text.Bounds.X+s.TextWidths[i] > text.ClipOf.X+text.ClipOf.Width+0.5) {
+							t.Errorf("%s text is clipped by %v", tc.control, text.ClipOf)
+						}
+					}
+					if !found {
+						t.Errorf("missing %s text %q", tc.control, tc.text)
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestLogColumnsAlignAtWindowWidths(t *testing.T) {
 	g := testutil.NewRepo(t)
@@ -77,6 +162,11 @@ func TestLogColumnsAlignAtWindowWidths(t *testing.T) {
 				ellipsis := false
 				for _, cell := range snapshot.Labels {
 					if cell.Bounds.Y < row.Y || cell.Bounds.Y >= row.Y+row.Height {
+						continue
+					}
+					// The changed-files tree now starts alongside the log. Its
+					// text belongs to a separate list and can share this row's Y.
+					if cell.Bounds.X >= list.X+list.Width && cell.Value == "base.txt" {
 						continue
 					}
 					if cell.Bounds.X < list.X-0.5 || cell.Bounds.X+cell.Bounds.Width > list.X+list.Width+0.5 {

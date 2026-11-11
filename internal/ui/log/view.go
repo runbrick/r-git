@@ -243,9 +243,9 @@ func (v *View) toolbar(c ui.C) {
 	t := c.Theme()
 	ui.Row(c).FillWidth().PadX(8).PadY(4).Gap(4).Items(ui.Center).Children(func() {
 		oldFilter, oldBranch, oldUser, oldDate := v.Filter, v.Branch, v.User, v.Date
-		ui.TextField(c, &v.Filter, "Filter", "Text or hash").Width(172).Grow(1)
+		ui.TextField(c, &v.Filter, "Filter", "Text or hash").Width(172).MinWidth(100).Grow(1)
 		toggle := func(label, text string, on *bool) {
-			button := controls.TextButton(c, label, text).Width(28).Tooltip(label)
+			button := controls.TextButton(c, label, text).Width(40).Shrink(0).Tooltip(label)
 			if *on {
 				button.Background(t.Selection)
 			}
@@ -256,8 +256,14 @@ func (v *View) toolbar(c ui.C) {
 		}
 		toggle("Regex", ".*", &v.Regex)
 		toggle("Match case", "Cc", &v.MatchCase)
-		ui.Select(c, &v.Branch, v.Choices, nil).Label("Branch").Width(128)
-		user := ui.Button(c, "User").Ghost().Tooltip("Filter by author")
+		ui.Select(c, &v.Branch, v.Choices, nil).Label("Branch").Width(128).Shrink(0)
+		user := ui.ButtonBase(c, "User").Width(80).Height(28).Shrink(0).PadX(8).
+			Radius(t.Metrics.RadiusControl).Border(1, t.Input).Tooltip("Filter by author").
+			Hover(ui.Look{}.Background(t.Hover)).Pressed(ui.Look{}.Background(t.Muted)).Focus(ui.Look{}.Ring(2, t.Ring)).
+			Children(func() {
+				ui.Text(c, "User").FontSize(13).Grow(1)
+				ui.Icon(c, icons.Pair(c, icons.Down, icons.Down_dark)).Size(16, 16)
+			})
 		if v.User != "" {
 			user.Background(t.Selection)
 		}
@@ -265,7 +271,7 @@ func (v *View) toolbar(c ui.C) {
 			v.userOpen = !v.userOpen
 		}
 		ui.Popover(c, user, &v.userOpen, func() { ui.TextField(c, &v.User, "User filter", "Author contains").Width(200) })
-		ui.Select(c, &v.Date, dateFilters, nil).Label("Date").Width(104)
+		ui.Select(c, &v.Date, dateFilters, nil).Label("Date").Width(128).Shrink(0)
 		if v.Toolbar != nil {
 			v.Toolbar(c)
 		}
@@ -305,9 +311,11 @@ func (v *View) toolbar(c ui.C) {
 func (v *View) Page(c ui.C) {
 	theme := c.Theme()
 	ui.Column(c).Fill().Children(func() {
+		// Filters and actions belong to the whole log tool window, including
+		// details. Sharing its width keeps controls usable at 1200px as well.
+		v.toolbar(c)
 		ui.Row(c).Fill().Children(func() {
 			ui.Column(c).Grow(1).Fill().Children(func() {
-				v.toolbar(c)
 				v.columns.showHash = v.ShowHash
 				if v.list.Label == nil {
 					v.list.Label = v.rowLabel

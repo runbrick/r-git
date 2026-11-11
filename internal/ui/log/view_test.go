@@ -7,6 +7,7 @@ import (
 
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/repo"
+	"github.com/runbrick/r-git/internal/graph/printer"
 )
 
 func TestFiltersCombineAndRejectInvalidRegex(t *testing.T) {
@@ -93,5 +94,45 @@ func TestShortDate(t *testing.T) {
 	when := time.Date(2026, 6, 16, 23, 31, 0, 0, time.FixedZone("+0800", 8*3600))
 	if got := shortDate(when); got != "16/6/26, 11:31 pm" {
 		t.Fatal(got)
+	}
+}
+
+func TestTrueHeadsOnlyHaveDownwardNodeEdges(t *testing.T) {
+	hash := func(c string) model.Hash { return model.MustParseHash(strings.Repeat(c, 40)) }
+	// Two true heads: an unmerged login tip and UI on top of main's merge.
+	// The login commit in the merge is an older parent of the login tip.
+	ordered := []repo.CommitParents{
+		{Commit: hash("a"), Parents: []model.Hash{hash("d")}},
+		{Commit: hash("b"), Parents: []model.Hash{hash("c")}},
+		{Commit: hash("c"), Parents: []model.Hash{hash("e"), hash("d")}},
+		{Commit: hash("d"), Parents: []model.Hash{hash("f")}},
+		{Commit: hash("e"), Parents: []model.Hash{hash("f")}},
+		{Commit: hash("f")},
+	}
+	rows, _, err := NewGraphRows(ordered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []int{0, 1} {
+		cell := rows.Row(row)
+		if len(cell.Nodes) != 1 {
+			t.Fatalf("head row %d: %+v", row, cell)
+		}
+		nodeLane := cell.Nodes[0].PositionInCurrentRow
+		down := false
+		for _, edge := range cell.Edges {
+			if row == 0 && edge.EdgePrintType == printer.EdgeUp {
+				t.Fatalf("edge above first row: %+v", edge)
+			}
+			if edge.PositionInCurrentRow == nodeLane {
+				if edge.EdgePrintType == printer.EdgeUp {
+					t.Fatalf("head row %d has upward node edge: %+v", row, edge)
+				}
+				down = true
+			}
+		}
+		if !down {
+			t.Fatalf("head row %d missing parent edge", row)
+		}
 	}
 }
