@@ -32,6 +32,11 @@ are shortened locally to avoid collisions between upstream directories.
 | right | vcs/arrowRight |
 | rollback | vcs/revert |
 | settings | general/settings |
+| show | general/show |
+| image | fileTypes/image |
+| yaml | fileTypes/yaml |
+| xml | fileTypes/xml |
+| typescript | fileTypes/typeScript |
 | stash | vcs/shelve |
 | text | fileTypes/text |
 | up | general/chevronUp |

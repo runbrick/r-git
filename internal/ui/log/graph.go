@@ -2,6 +2,7 @@ package log
 
 import (
 	"fmt"
+	"unicode/utf16"
 
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/repo"
@@ -14,16 +15,25 @@ type GraphRows struct {
 	rows   *printer.PreparedRows
 	buffer *printer.RowBuffer
 	count  int
+	width  float32
 }
 
-type themeColors struct{}
+type themeColors map[int32]string
 
-func (themeColors) GetColor(headCommit int32, headFragmentIndex, fragmentIndex int) int {
-	return int(headCommit % 5)
+func (refs themeColors) GetColor(headCommit int32, headFragmentIndex, fragmentIndex int) int {
+	if headFragmentIndex != fragmentIndex {
+		return fragmentIndex
+	}
+	// Java String.hashCode operates on UTF-16 code units, with signed Int overflow.
+	var hash int32
+	for _, unit := range utf16.Encode([]rune(refs[headCommit])) {
+		hash = hash*31 + int32(unit)
+	}
+	return int(hash)
 }
 
 // NewGraphRows prepares graph rows from commits in newest-first order.
-func NewGraphRows(ordered []repo.CommitParents) (*GraphRows, map[model.Hash]int, error) {
+func NewGraphRows(ordered []repo.CommitParents, refs ...repo.Reference) (*GraphRows, map[model.Hash]int, error) {
 	if len(ordered) == 0 {
 		return &GraphRows{}, map[model.Hash]int{}, nil
 	}
@@ -56,10 +66,33 @@ func NewGraphRows(ordered []repo.CommitParents) (*GraphRows, map[model.Hash]int,
 			return 0
 		}
 	})
-	getter := printer.NewGraphColorGetterByHead(layout, linear, themeColors{})
+	colors := themeColors{}
+	best := make(map[int32]model.Ref)
+	for _, ref := range refs {
+		if index, ok := indexes[ref.Hash]; ok {
+			key := int32(index)
+			old, exists := best[key]
+			if !exists || refPriority(ref.Ref) < refPriority(old) || refPriority(ref.Ref) == refPriority(old) && model.NaturalCompare(ref.Ref.Name(), old.Name()) < 0 {
+				best[key] = ref.Ref
+				colors[key] = ref.Ref.Name()
+			}
+		}
+	}
+	getter := printer.NewGraphColorGetterByHead(layout, linear, colors)
 	generator := printer.NewPrintElementGenerator(linear, &printer.PresentationManager{ColorGetter: getter, LinearGraph: linear, Layout: layout}, false)
 	prepared := generator.PrepareRows()
-	return &GraphRows{rows: prepared, buffer: prepared.NewBuffer(), count: len(ordered)}, indexes, nil
+	buffer := prepared.NewBuffer()
+	maxLane := 0
+	for row := range ordered {
+		prepared.GetRow(row, buffer)
+		for _, node := range buffer.Nodes {
+			maxLane = max(maxLane, node.PositionInCurrentRow)
+		}
+		for _, edge := range buffer.Edges {
+			maxLane = max(maxLane, edge.PositionInCurrentRow, edge.PositionInOtherRow)
+		}
+	}
+	return &GraphRows{rows: prepared, buffer: buffer, count: len(ordered), width: float32(maxLane+1) * 16}, indexes, nil
 }
 
 // Row copies the prepared row into the caller-owned buffer.
@@ -73,4 +106,27 @@ func (g *GraphRows) Row(index int) *printer.RowBuffer {
 
 func (g *GraphRows) rowsCount() int {
 	return g.count
+}
+
+// GitRefManager.GitBranchLayoutComparator prefers tracked heads, then main
+// branches, other local branches and tags, independently of enumeration order.
+func refPriority(ref model.Ref) int {
+	switch ref.Kind() {
+	case model.KindRemoteBranch:
+		if ref.Name() == "origin/main" || ref.Name() == "origin/master" {
+			return 0
+		}
+		return 1
+	case model.KindLocalBranch:
+		if ref.Name() == "main" || ref.Name() == "master" {
+			return 2
+		}
+		return 3
+	case model.KindTag:
+		return 4
+	case model.KindHead:
+		return 6
+	default:
+		return 7
+	}
 }

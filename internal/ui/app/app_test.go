@@ -29,7 +29,7 @@ func TestOpenRepositoryShowsLogAndDetails(t *testing.T) {
 			viva.SetNativeAppearance(appearance)
 			m, driver := openDriverTheme(t, g.Dir, appearance.String())
 			waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading && hasLabel(driver, "new.txt") })
-			if !hasLabel(driver, "add new file for log") || !hasLabel(driver, "Hash") || !hasLabel(driver, "new.txt") {
+			if !hasLabel(driver, "add new file for log") || !hasLabel(driver, m.log.Commits[0].Hash.Short()) || !hasLabel(driver, "new.txt") {
 				t.Fatalf("log row/details labels missing: %v", labelValues(driver))
 			}
 			if len(m.log.Commits) != 2 || m.log.Selected().String() != second {

@@ -45,6 +45,7 @@ type loadResult struct {
 	graphIndex map[model.Hash]int
 	commits    []model.Commit
 	details    []model.FileChange
+	containing []string
 	hash       model.Hash
 	done       bool
 	err        error
@@ -123,6 +124,8 @@ func New(configDir, initialPath string) (*Model, error) {
 	m.log.OnPage = m.loadPage
 	m.log.OnSelect = m.loadDetails
 	m.log.Toolbar = m.networkToolbar
+	m.log.OnRefresh = m.refresh
+	m.commit.OnRefresh = m.refreshStatus
 	m.initTools()
 	m.commit.OnRequest = m.handleCommitRequest
 	m.commit.OnShowDiff = func(hash model.Hash, path string) {
@@ -475,7 +478,7 @@ func (m *Model) loadOpen(ctx context.Context, path string, generation uint64) lo
 		out.ordered, err = out.repo.ParentsOrderedAll(ctx)
 	}
 	if err == nil {
-		out.graph, out.graphIndex, err = logview.NewGraphRows(out.ordered)
+		out.graph, out.graphIndex, err = logview.NewGraphRows(out.ordered, graphReferences(out.repo)...)
 	}
 	if err == nil {
 		out.commits, err = out.repo.Log(ctx, repo.LogQuery{MaxCount: pageSize, All: true})
@@ -525,7 +528,11 @@ func (m *Model) loadDetails(hash model.Hash) {
 	go func() {
 		defer m.workers.Done()
 		files, err := repository.ChangedFiles(ctx, hash)
-		m.publish(&loadResult{kind: resultDetails, generation: generation, hash: hash, details: files, err: err})
+		var containing []string
+		if err == nil {
+			containing, err = repository.ContainingBranches(ctx, hash)
+		}
+		m.publish(&loadResult{kind: resultDetails, generation: generation, hash: hash, details: files, containing: containing, err: err})
 	}()
 }
 
@@ -539,6 +546,7 @@ func (m *Model) changeBranch(branch string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx, m.cancel = ctx, cancel
 	m.log.ResetBranch(branch)
+	m.log.CurrentBranch = m.repo.CurrentBranch.Name()
 	m.log.SetRefs(m.repo.HEAD, m.repo.Branches, m.repo.Tags)
 	repository := m.repo
 	m.workers.Add(1)
@@ -556,7 +564,7 @@ func (m *Model) changeBranch(branch string) {
 		var graphRows *logview.GraphRows
 		var graphIndex map[model.Hash]int
 		if err == nil {
-			graphRows, graphIndex, err = logview.NewGraphRows(ordered)
+			graphRows, graphIndex, err = logview.NewGraphRows(ordered, graphReferences(repository)...)
 		}
 		var commits []model.Commit
 		if err == nil {
@@ -636,6 +644,7 @@ func (m *Model) applyResult(result *loadResult) {
 		} else {
 			m.log.Branch = result.branch
 		}
+		m.log.CurrentBranch = result.repo.CurrentBranch.Name()
 		m.log.SetRefs(result.repo.HEAD, result.repo.Branches, result.repo.Tags)
 		m.log.ResetBranch(m.log.Branch)
 		m.log.SetGraph(result.graph, result.graphIndex)
@@ -658,6 +667,7 @@ func (m *Model) applyResult(result *loadResult) {
 	case resultDetails:
 		if result.hash.Equal(m.log.Selected()) {
 			m.log.SetDetails(result.details)
+			m.log.SetContaining(result.containing)
 		}
 	}
 }
@@ -779,4 +789,14 @@ func (m *Model) nextGeneration() uint64 {
 	generation := m.generation
 	m.mu.Unlock()
 	return generation
+}
+
+func graphReferences(repository *repo.Repo) []repo.Reference {
+	refs := make([]repo.Reference, 0, len(repository.Branches)+len(repository.Tags)+1)
+	refs = append(refs, repository.Branches...)
+	refs = append(refs, repository.Tags...)
+	if !repository.HEAD.IsZero() {
+		refs = append(refs, repo.Reference{Ref: model.HeadRef(), Hash: repository.HEAD})
+	}
+	return refs
 }

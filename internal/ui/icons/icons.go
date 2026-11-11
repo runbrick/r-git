@@ -30,7 +30,15 @@ func File(c ui.C, name string) gfx.Icon {
 		return Pair(c, Json, Json_dark)
 	case ".java", ".kt", ".kts":
 		return Pair(c, Java, Java_dark)
-	case ".js", ".jsx", ".ts", ".tsx":
+	case ".yaml", ".yml":
+		return Pair(c, Yaml, Yaml_dark)
+	case ".xml", ".xsd", ".xhtml":
+		return Pair(c, Xml, Xml_dark)
+	case ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".icns":
+		return Pair(c, Image, Image_dark)
+	case ".ts", ".tsx":
+		return Pair(c, Typescript, Typescript_dark)
+	case ".js", ".jsx":
 		return Pair(c, Javascript, Javascript_dark)
 	default:
 		return Pair(c, Text, Text_dark)

@@ -25,7 +25,7 @@ func TestOpenRepoShowsLogGraphAndBranches(t *testing.T) {
 	a.waitFor("second history entry")
 	a.waitFor("topic")
 	texts := a.textDump()
-	for _, needle := range []string{"Graph", "Subject", "Author", "Hash", "topic"} {
+	for _, needle := range []string{"Subject", "Author", "Date", "topic"} {
 		if !strings.Contains(texts, needle) {
 			t.Fatalf("log missing %q\n%s", needle, texts)
 		}

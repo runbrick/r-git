@@ -29,7 +29,9 @@ type CommitParents struct {
 // Log reads a page of commits using NUL-delimited fields, following the
 // field-oriented record scheme used by GitLogParser without ambiguous paths.
 func (r *Repo) Log(ctx context.Context, q LogQuery) ([]model.Commit, error) {
-	args := []string{"log", "--no-color", "--no-show-signature", "--date=raw", "--format=%x00%H%x00%P%x00%an%x00%ae%x00%at %ai%x00%cn%x00%ce%x00%ct %ci%x00%B%x00"}
+	// Metadata pages must follow the same order as ParentsOrdered: graph cells
+	// connect adjacent topological rows, not independently date-sorted commits.
+	args := []string{"log", "--topo-order", "--no-color", "--no-show-signature", "--date=raw", "--format=%x00%H%x00%P%x00%an%x00%ae%x00%at %ai%x00%cn%x00%ce%x00%ct %ci%x00%B%x00"}
 	if q.MaxCount > 0 {
 		args = append(args, "-n", strconv.Itoa(q.MaxCount))
 	}
@@ -233,4 +235,18 @@ func ParseNameStatusZ(data []byte) ([]model.FileChange, error) {
 		i++
 	}
 	return changes, nil
+}
+
+// ContainingBranches returns all local and remote branch names containing a
+// commit, regardless of the currently loaded history page or branch filter.
+func (r *Repo) ContainingBranches(ctx context.Context, hash model.Hash) ([]string, error) {
+	out, err := r.run(ctx, "for-each-ref", "--contains="+hash.String(), "--format=%(refname:short)", "refs/heads/", "refs/remotes/")
+	if err != nil {
+		return nil, err
+	}
+	text := strings.TrimSpace(string(out.Stdout))
+	if text == "" {
+		return nil, nil
+	}
+	return strings.Split(text, "\n"), nil
 }

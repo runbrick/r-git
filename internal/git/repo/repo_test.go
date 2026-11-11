@@ -241,6 +241,7 @@ func TestChangedFilesCopiedAndTypeChanged(t *testing.T) {
 func TestLogQueryFiltersAndParentsOrdered(t *testing.T) {
 	// Ported from GitLogParserTest.generateRecords and GitLogUtilTest history ordering cases.
 	g := testutil.NewRepo(t)
+	t.Setenv("GIT_COMMITTER_DATE", "2026-01-01T12:00:00Z")
 	g.WriteFile("a.txt", "zero\n")
 	initial := g.Commit("initial")
 	g.WriteFile("a.txt", "one\n")
@@ -250,11 +251,14 @@ func TestLogQueryFiltersAndParentsOrdered(t *testing.T) {
 	g.WriteFile("a.txt", "two\n")
 	a2 := g.Commit("a2")
 	g.Git("checkout", "-qb", "side")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-01-03T12:00:00Z")
 	g.WriteFile("side.txt", "side\n")
 	side := g.Commit("side")
 	g.Git("checkout", "-q", "master")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-01-02T12:00:00Z")
 	g.WriteFile("main.txt", "main\n")
 	main := g.Commit("main")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-01-04T12:00:00Z")
 	g.Git("merge", "--no-ff", "-m", "merge", "side")
 	merge := strings.TrimSpace(g.Git("rev-parse", "HEAD"))
 	r := openTestRepo(t, g.Dir)
@@ -263,9 +267,9 @@ func TestLogQueryFiltersAndParentsOrdered(t *testing.T) {
 		query LogQuery
 		want  []string
 	}{
-		{name: "max count", query: LogQuery{MaxCount: 2}, want: []string{merge, main}},
-		{name: "skip", query: LogQuery{MaxCount: 1, Skip: 1}, want: []string{main}},
-		{name: "range", query: LogQuery{Range: b1 + "..HEAD"}, want: []string{merge, main, side, a2}},
+		{name: "max count", query: LogQuery{MaxCount: 2}, want: []string{merge, side}},
+		{name: "skip", query: LogQuery{MaxCount: 1, Skip: 1}, want: []string{side}},
+		{name: "range", query: LogQuery{Range: b1 + "..HEAD"}, want: []string{merge, side, main, a2}},
 		{name: "branch", query: LogQuery{Branch: "side"}, want: []string{side, a2, b1, a1, initial}},
 		{name: "path", query: LogQuery{Paths: []string{"a.txt"}}, want: []string{a2, a1, initial}},
 	}

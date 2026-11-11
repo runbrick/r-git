@@ -31,11 +31,13 @@ func TestSuccessfulCommitResetsOpenForm(t *testing.T) {
 			if amend {
 				clickControl(t, driver, "Amend")
 			}
+			clickControl(t, driver, "Commit options")
 			clickControl(t, driver, "Sign-off")
 			clickControl(t, driver, "Author")
 			if err := driver.Type("Other Author <other@example.invalid>"); err != nil {
 				t.Fatal(err)
 			}
+			clickControl(t, driver, "Commit options")
 			clickControl(t, driver, "Commit changes")
 			waitFor(t, driver, func() bool { return !m.commit.Busy && (hasLabel(driver, "Committed") || m.commit.Error != "") })
 			if m.commit.Error != "" {
@@ -229,39 +231,7 @@ func groupOf(m *Model, path string) repo.ChangeGroup {
 
 func clickNearLabel(t *testing.T, driver *viva.Driver, fileLabel, action string) {
 	t.Helper()
-	var fileY float32
-	found := false
-	for _, hit := range driver.Snapshot().Hits {
-		if hit.Label == fileLabel {
-			fileY = hit.Bounds.Y
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("no file %q among %v", fileLabel, labelValues(driver))
-	}
-	var best *gfx.Rect
-	bestDist := float32(1e9)
-	for i := range driver.Snapshot().Hits {
-		hit := driver.Snapshot().Hits[i]
-		if hit.Label != action {
-			continue
-		}
-		dist := hit.Bounds.Y - fileY
-		if dist < 0 {
-			dist = -dist
-		}
-		if dist < bestDist {
-			bestDist = dist
-			r := hit.Bounds
-			best = &r
-		}
-	}
-	if best == nil || bestDist > 40 {
-		t.Fatalf("no %q near %q (dist %v)", action, fileLabel, bestDist)
-	}
-	if err := driver.Click(best.X+best.Width/2, best.Y+best.Height/2); err != nil {
-		t.Fatal(err)
-	}
+	// File actions moved from every row into the selected-file toolbar.
+	clickControl(t, driver, fileLabel)
+	clickControl(t, driver, action)
 }
