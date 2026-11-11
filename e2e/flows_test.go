@@ -57,10 +57,8 @@ func TestEditStageCommitAppearsInLog(t *testing.T) {
 	if status := f.git(t, "status", "--porcelain"); status != "" {
 		t.Fatalf("working tree not clean:\n%s", status)
 	}
-	a.click("Commit")
-	a.command(`expect absent "Commit changes"`)
-	a.click("Commit")
-	a.waitFor("No changes")
+	a.waitFor("Describe the change")
+	a.command(`expect exists "Commit changes"`)
 }
 
 func TestCreateBranchCommitAndPush(t *testing.T) {

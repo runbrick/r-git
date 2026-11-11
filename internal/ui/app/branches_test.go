@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,62 @@ import (
 	"github.com/vivaui/viva/gfx"
 	"github.com/vivaui/viva/headless"
 )
+
+func TestPushFailuresShowGitError(t *testing.T) {
+	for _, name := range []string{"missing remote", "unreachable file URL", "tags after branch success"} {
+		t.Run(name, func(t *testing.T) {
+			g := testutil.NewRepo(t)
+			g.WriteFile("base.txt", "base\n")
+			g.Commit("initial")
+			g.Git("branch", "-M", "main")
+			remote := "missing-remote"
+			if name != "missing remote" {
+				path := filepath.ToSlash(filepath.Join(t.TempDir(), "missing.git"))
+				if !strings.HasPrefix(path, "/") {
+					path = "/" + path
+				}
+				g.Git("remote", "add", "origin", (&url.URL{Scheme: "file", Path: path}).String())
+				remote = "origin"
+			}
+			if name == "tags after branch success" {
+				remote = filepath.Join(t.TempDir(), "remote.git")
+				g.Git("init", "--bare", remote)
+			}
+			m, driver := openDriver(t, g.Dir)
+			waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
+			clickControl(t, driver, "Push")
+			waitFor(t, driver, func() bool { return m.branches.Push.Open })
+			clickControl(t, driver, "Remote")
+			if _, err := driver.ShortcutChord(gfx.ModifierControl, 'a'); err != nil {
+				t.Fatal(err)
+			}
+			if err := driver.Type(remote); err != nil {
+				t.Fatal(err)
+			}
+			if name == "tags after branch success" {
+				clickControl(t, driver, "Push tags")
+			}
+			clickControl(t, driver, "Push commits")
+			waitFor(t, driver, func() bool { return m.branches.Panel.Error != "" })
+			m.workers.Wait()
+			m.applyPending()
+			if err := driver.Pump(); err != nil {
+				t.Fatal(err)
+			}
+			if !hasLabel(driver, "Git error") || !hasLabel(driver, "fatal:") {
+				t.Fatalf("missing git diagnostics: %v", labelValues(driver))
+			}
+			if hasLabel(driver, "Pushed") {
+				t.Fatalf("failed push reported success: %v", labelValues(driver))
+			}
+			if name == "tags after branch success" {
+				if got := strings.TrimSpace(g.Git("--git-dir", remote, "rev-parse", "main")); got != strings.TrimSpace(g.Git("rev-parse", "main")) {
+					t.Fatal("branch push did not succeed before tag push failed")
+				}
+			}
+		})
+	}
+}
 
 func TestBranchFlowsOnBareRemote(t *testing.T) {
 	g := testutil.NewRepo(t)

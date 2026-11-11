@@ -10,6 +10,67 @@ import (
 	"github.com/vivaui/viva/gfx"
 )
 
+func TestSuccessfulCommitResetsOpenForm(t *testing.T) {
+	for _, amend := range []bool{false, true} {
+		name := "new commit"
+		if amend {
+			name = "amend"
+		}
+		t.Run(name, func(t *testing.T) {
+			g := testutil.NewRepo(t)
+			g.WriteFile("base.txt", "base\n")
+			g.Commit("initial")
+			g.WriteFile("base.txt", "changed\n")
+			m, driver := openDriver(t, g.Dir)
+			waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
+			clickControl(t, driver, "Commit")
+			waitFor(t, driver, func() bool { return len(m.commit.Entries) > 0 })
+			clickControl(t, driver, "Commit message")
+			if err := driver.Type("next subject"); err != nil {
+				t.Fatal(err)
+			}
+			if amend {
+				clickControl(t, driver, "Amend")
+			}
+			clickControl(t, driver, "Sign-off")
+			clickControl(t, driver, "Author")
+			if err := driver.Type("Other Author <other@example.invalid>"); err != nil {
+				t.Fatal(err)
+			}
+			clickControl(t, driver, "Commit changes")
+			waitFor(t, driver, func() bool { return !m.commit.Busy && (hasLabel(driver, "Committed") || m.commit.Error != "") })
+			if m.commit.Error != "" {
+				t.Fatal(m.commit.Error)
+			}
+			if !m.showCommit || !hasLabel(driver, "Describe the change") || !hasLabel(driver, "No changes") {
+				t.Fatalf("commit form was not ready for another commit: %v", labelValues(driver))
+			}
+			if m.commit.Message != "" || m.commit.Amend {
+				t.Fatalf("form retained message=%q amend=%v", m.commit.Message, m.commit.Amend)
+			}
+			if !m.commit.SignOff || m.commit.Author != "Other Author <other@example.invalid>" {
+				t.Fatalf("lost reusable options: signoff=%v author=%q", m.commit.SignOff, m.commit.Author)
+			}
+			if got := strings.TrimSpace(g.Git("log", "-1", "--format=%s")); got != "next subject" {
+				t.Fatalf("subject = %q", got)
+			}
+			wantCount := "2"
+			if amend {
+				wantCount = "1"
+			}
+			if got := strings.TrimSpace(g.Git("rev-list", "--count", "HEAD")); got != wantCount {
+				t.Fatalf("commit count = %s, want %s", got, wantCount)
+			}
+			// Amend still prefills the new HEAD; leaving it must restore an
+			// empty draft, rather than resurrecting the committed message.
+			clickControl(t, driver, "Amend")
+			waitFor(t, driver, func() bool { return m.commit.Message == "next subject" })
+			clickControl(t, driver, "Amend")
+			waitFor(t, driver, func() bool { return m.commit.Message == "" && hasLabel(driver, "Describe the change") })
+		})
+	}
+}
+
 func TestCommitPanelGroupsStageCommitAmendAndDiscard(t *testing.T) {
 	g := testutil.NewRepo(t)
 	g.WriteFile("keep.txt", "keep\n")

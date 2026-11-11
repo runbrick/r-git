@@ -325,8 +325,9 @@ func (v *View) submit(push bool) {
 	})
 }
 
-// ClearMessage resets the form after a successful commit.
-func (v *View) ClearMessage() {
+// ResetAfterCommit leaves the tool window open with an empty draft and Amend
+// unchecked. Author and Sign-off remain selected, as in IntelliJ's commit panel.
+func (v *View) ResetAfterCommit() {
 	v.Message = ""
 	v.Amend = false
 	v.amendWas = false
