@@ -34,7 +34,6 @@ func TestPartialCommitKeepsUncheckedStagedHunk(t *testing.T) {
 
 	m, driver := openDriver(t, g.Dir)
 	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
-	clickControl(t, driver, "Commit")
 	waitFor(t, driver, func() bool { return groupOf(m, "b.txt") == repo.GroupStaged && groupOf(m, "a.txt") == repo.GroupStaged })
 	m.commit.SetIncluded(repo.GroupStaged, "a.txt", false)
 	m.commit.SetIncluded(repo.GroupUnstaged, "a.txt", false)
@@ -81,7 +80,6 @@ func TestFailedCommitLeavesIndexUnchanged(t *testing.T) {
 	before := strings.TrimSpace(g.Git("diff", "--cached", "--name-only"))
 	m, driver := openDriver(t, g.Dir)
 	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
-	clickControl(t, driver, "Commit")
 	waitFor(t, driver, func() bool { return groupOf(m, "b.txt") == repo.GroupStaged })
 	m.commit.SetIncluded(repo.GroupStaged, "a.txt", false)
 	m.handleCommitRequest(commitview.Request{Kind: commitview.RequestCommit, Paths: []string{"b.txt"}, Message: "should fail"})

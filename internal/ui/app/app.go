@@ -12,7 +12,10 @@ import (
 	"github.com/runbrick/r-git/internal/git/repo"
 	branchui "github.com/runbrick/r-git/internal/ui/branches"
 	commitview "github.com/runbrick/r-git/internal/ui/commit"
+	"github.com/runbrick/r-git/internal/ui/controls"
+	"github.com/runbrick/r-git/internal/ui/icons"
 	logview "github.com/runbrick/r-git/internal/ui/log"
+	apptheme "github.com/runbrick/r-git/internal/ui/theme"
 	viva "github.com/vivaui/viva/app"
 	"github.com/vivaui/viva/gfx"
 	"github.com/vivaui/viva/ui"
@@ -67,6 +70,12 @@ type Model struct {
 	log           logview.View
 	commit        commitview.View
 	showCommit    bool
+	showBranches  bool
+	theme         ui.Theme
+	settingsOpen  bool
+	projectsOpen  bool
+	branchOpen    bool
+	branchPopup   branchui.Panel
 	branches      branchui.Session
 	runner        *command.Runner
 	localBranches []string
@@ -102,12 +111,18 @@ func New(configDir, initialPath string) (*Model, error) {
 		return nil, err
 	}
 	m := &Model{configDir: configDir, appConfig: settings, initial: initialPath, pathEntry: initialPath, seenFrame: make(chan struct{})}
+	m.showCommit = true
+	m.theme = apptheme.Dark()
+	if settings.Theme == "light" {
+		m.theme = apptheme.Light()
+	}
 	m.log.Branch = "All branches"
 	m.log.Choices = []string{"All branches"}
 	m.log.Done = initialPath == ""
 	m.log.OnBranch = m.changeBranch
 	m.log.OnPage = m.loadPage
 	m.log.OnSelect = m.loadDetails
+	m.log.Toolbar = m.networkToolbar
 	m.initTools()
 	m.commit.OnRequest = m.handleCommitRequest
 	m.commit.OnShowDiff = func(hash model.Hash, path string) {
@@ -118,6 +133,10 @@ func New(configDir, initialPath string) (*Model, error) {
 	m.OnFetch = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionFetch}, m.startGit, m.refresh) }
 	m.OnPull = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionPull}, m.startGit, m.refresh) }
 	m.OnPush = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionPush}, m.startGit, m.refresh) }
+	m.branchPopup.OnRequest = func(req branchui.Request) {
+		m.branchOpen = false
+		m.branches.Handle(req, m.startGit, m.refresh)
+	}
 	return m, nil
 }
 
@@ -127,7 +146,7 @@ func Run(configDir, initialPath string) error {
 	if err != nil {
 		return err
 	}
-	page := ui.NewPage(ui.PageConfig{View: m.Page, Invalidator: &m.invalidator})
+	page := ui.NewPage(ui.PageConfig{View: m.Page, Theme: &m.theme, Invalidator: &m.invalidator})
 	var canvas gfx.Canvas
 	return viva.RunCanvas(page.Config(viva.Config{Title: "r-git", Width: 1400, Height: 900,
 		OnWake:   m.applyPending,
@@ -136,7 +155,7 @@ func Run(configDir, initialPath string) error {
 }
 
 func (m *Model) config() viva.Config {
-	page := ui.NewPage(ui.PageConfig{View: m.Page, Invalidator: &m.invalidator})
+	page := ui.NewPage(ui.PageConfig{View: m.Page, Theme: &m.theme, Invalidator: &m.invalidator})
 	return page.Config(viva.Config{Title: "r-git", Width: 1400, Height: 900,
 		OnWake:   m.applyPending,
 		OnClosed: func() { m.stopWorkers() },
@@ -150,28 +169,42 @@ func (m *Model) Page(c ui.C) {
 		m.startQueued = true
 		m.startOpen(m.initial)
 	}
-	ui.Column(c).Fill().Background(theme.Background).Children(func() {
+	ui.Column(c).Fill().Background(theme.Card).Children(func() {
 		m.toolbar(c)
 		if m.repo == nil {
 			m.startPage(c)
-		} else if m.toolsPage(c) {
-		} else if m.showCommit {
-			m.commit.Page(c)
 		} else {
-			ui.Row(c).Fill().Children(func() {
-				ui.Column(c).Width(320).FillHeight().Background(theme.Card).Border(1, theme.Border).Children(func() {
-					m.branches.Panel.Page(c)
-					if ui.Button(c, "Open stash").Clicked() {
-						c.After(func() { m.branches.Handle(branchui.Request{Action: branchui.ActionStash}, m.startGit, m.refresh) })
+			ui.Row(c).Fill().Gap(4).Children(func() {
+				m.stripe(c)
+				if m.showCommit || m.showBranches {
+					ui.Column(c).Width(320).FillHeight().Background(theme.Background).Radius(8).Children(func() {
+						if m.showCommit {
+							m.commit.Page(c)
+						} else {
+							m.branches.Panel.Page(c)
+							if controls.IconButton(c, icons.Pair(c, icons.Stash, icons.Stash_dark), "Open stash").Clicked() {
+								c.After(func() { m.branches.Handle(branchui.Request{Action: branchui.ActionStash}, m.startGit, m.refresh) })
+							}
+						}
+					})
+				}
+				ui.Column(c).Fill().Background(theme.Background).Radius(8).Children(func() {
+					m.editorTabs(c)
+					if !m.toolsPage(c) {
+						m.log.Page(c)
 					}
 				})
-				m.log.Page(c)
+			})
+			ui.Row(c).FillWidth().Height(24).PadX(16).Gap(12).Items(ui.Center).Children(func() {
+				ui.Text(c, m.repo.Path).FontSize(12).Muted()
+				ui.Spacer(c)
+				ui.Text(c, m.branchName()).FontSize(12).Muted()
 			})
 		}
 		m.branches.Overlays(c)
 		c.After(func() { m.branches.AfterPaint(m.startGit, m.refresh) })
 	})
-	m.tools.rebase.Page(c)
+	m.settings(c)
 	m.noteFrame()
 }
 
@@ -186,34 +219,82 @@ func (m *Model) noteFrame() {
 }
 
 func (m *Model) toolbar(c ui.C) {
-	theme := c.Theme()
-	ui.Row(c).FillWidth().PadX(16).PadY(8).Gap(8).Items(ui.Center).Background(theme.Card).Border(1, theme.Border).Children(func() {
-		ui.Text(c, "r-git").Bold()
+	t := c.Theme()
+	ui.Row(c).FillWidth().Height(44).PadX(12).Gap(8).Items(ui.Center).Background(t.Card).Children(func() {
+		ui.Text(c, "r-git").Bold().Color(t.Primary).Width(40)
+		name := "Open repository"
 		if m.repo != nil {
-			ui.Text(c, filepath.Base(m.repo.Path)).FontSize(12).Muted()
+			name = filepath.Base(m.repo.Path)
+		}
+		project := ui.ButtonBase(c, name).Height(28).PadX(8).Gap(8).Radius(4).Tooltip("Recent projects").Hover(ui.Look{}.Background(t.Hover)).Focus(ui.Look{}.Ring(2, t.Ring)).Children(func() {
+			ui.Icon(c, icons.Pair(c, icons.Folder, icons.Folder_dark)).Size(16, 16)
+			ui.Text(c, name).FontSize(13)
+			ui.Icon(c, icons.Pair(c, icons.Down, icons.Down_dark)).Size(16, 16)
+		})
+		if project.Clicked() {
+			m.projectsOpen = !m.projectsOpen
+		}
+		ui.Menu(c, project, &m.projectsOpen, func(menu *ui.MenuItems) {
+			for _, recent := range m.appConfig.Recent {
+				item := recent
+				if menu.Item(item.DisplayName).Clicked() {
+					c.After(func() { m.startOpen(item.Path) })
+				}
+			}
+			if menu.Item("Open repository").Clicked() {
+				c.After(m.returnToPicker)
+			}
+		})
+		if m.repo != nil {
+			branch := ui.ButtonBase(c, m.branchName()).Height(28).PadX(8).Gap(8).Radius(4).Tooltip("Branches").Hover(ui.Look{}.Background(t.Hover)).Focus(ui.Look{}.Ring(2, t.Ring)).Children(func() {
+				ui.Icon(c, icons.Pair(c, icons.Branches, icons.Branches_dark)).Size(16, 16)
+				ui.Text(c, m.branchName()).FontSize(13)
+				ui.Icon(c, icons.Pair(c, icons.Down, icons.Down_dark)).Size(16, 16)
+			})
+			if branch.Clicked() {
+				c.After(func() {
+					m.branchOpen = !m.branchOpen
+					if m.branchOpen {
+						// Each visible tree owns its selection and disclosure state.
+						m.branchPopup.Nodes = append(m.branchPopup.Nodes[:0], m.branches.Panel.Nodes...)
+						m.branchPopup.Selected = m.branches.Panel.Selected
+					}
+				})
+			}
+			ui.Popover(c, branch, &m.branchOpen, func() {
+				ui.Column(c).Width(304).Height(440).Gap(4).Children(func() {
+					m.networkToolbar(c)
+					m.branchPopup.Page(c)
+				})
+			})
 		}
 		ui.Spacer(c)
-		m.toolsToolbar(c)
-		if m.OnFetch == nil {
-			ui.Button(c, "Fetch").Disabled(true)
-		} else if ui.Button(c, "Fetch").Clicked() {
-			c.After(m.OnFetch)
+		if controls.IconButton(c, icons.Pair(c, icons.Refresh, icons.Refresh_dark), "Refresh").Disabled(m.repo == nil || m.tools.busy).Clicked() {
+			c.After(m.refresh)
 		}
-		if m.OnPull == nil {
-			ui.Button(c, "Pull").Disabled(true)
-		} else if ui.Button(c, "Pull").Clicked() {
-			c.After(m.OnPull)
+		if controls.IconButton(c, icons.Pair(c, icons.Settings, icons.Settings_dark), "Settings").Clicked() {
+			m.settingsOpen = true
 		}
-		if m.OnPush == nil {
-			ui.Button(c, "Push").Disabled(true)
-		} else if ui.Button(c, "Push").Clicked() {
-			c.After(m.OnPush)
+	})
+}
+
+func (m *Model) branchName() string {
+	if m.repo != nil && m.repo.CurrentBranch.Name() != "" {
+		return m.repo.CurrentBranch.Name()
+	}
+	return "HEAD"
+}
+
+func (m *Model) stripe(c ui.C) {
+	ui.Column(c).Width(36).FillHeight().Gap(8).PadY(4).Items(ui.Center).Children(func() {
+		commit := controls.IconButton(c, icons.Pair(c, icons.Commit, icons.Commit_dark), "Commit")
+		if m.showCommit {
+			commit.Background(c.Theme().Hover)
 		}
-		if m.repo == nil {
-			ui.Button(c, "Commit").Disabled(true)
-		} else if ui.Button(c, "Commit").Clicked() {
+		if commit.Clicked() {
 			c.After(func() {
 				m.showCommit = !m.showCommit
+				m.showBranches = false
 				if m.showCommit {
 					m.refreshStatus()
 				}
@@ -222,11 +303,97 @@ func (m *Model) toolbar(c ui.C) {
 				}
 			})
 		}
-		if m.repo != nil && ui.Button(c, "Refresh").Disabled(m.tools.busy).Clicked() {
-			c.After(func() { m.startOpen(m.repo.Path) })
+		branches := controls.IconButton(c, icons.Pair(c, icons.Branches, icons.Branches_dark), "Branches")
+		if m.showBranches {
+			branches.Background(c.Theme().Hover)
 		}
-		if m.repo != nil && ui.Button(c, "Open repository").Disabled(m.tools.busy).Clicked() {
-			c.After(m.returnToPicker)
+		if branches.Clicked() {
+			m.showBranches = !m.showBranches
+			m.showCommit = false
+			m.branchOpen = false
+		}
+	})
+}
+
+func (m *Model) networkToolbar(c ui.C) {
+	ui.Row(c).Gap(4).Items(ui.Center).Children(func() {
+		if controls.IconButton(c, icons.Pair(c, icons.Fetch, icons.Fetch_dark), "Fetch").Disabled(m.OnFetch == nil).Clicked() {
+			c.After(m.OnFetch)
+		}
+		if controls.IconButton(c, icons.Pair(c, icons.Pull, icons.Pull_dark), "Pull").Disabled(m.OnPull == nil).Clicked() {
+			c.After(m.OnPull)
+		}
+		if controls.IconButton(c, icons.Pair(c, icons.Push, icons.Push_dark), "Push").Disabled(m.OnPush == nil).Clicked() {
+			c.After(m.OnPush)
+		}
+	})
+}
+
+func (m *Model) editorTabs(c ui.C) {
+	t := c.Theme()
+	ui.Row(c).FillWidth().Height(36).PadX(8).Gap(4).Items(ui.Center).FocusGroup(ui.FocusHorizontal).Border(1, t.Border).Children(func() {
+		logTitle := "Log: " + m.branchName()
+		if m.log.Branch != "All branches" {
+			logTitle = "Log: " + m.log.Branch
+		}
+		if m.editorTab(c, "", logTitle, icons.Pair(c, icons.Branches, icons.Branches_dark)).Clicked() {
+			m.tools.rebase.Open = false
+		}
+		if m.editorTab(c, "merge", "Conflicts", icons.Pair(c, icons.Merge, icons.Merge_dark)).Clicked() {
+			c.After(m.showConflicts)
+		}
+		if m.editorTab(c, "rebase", "Interactive rebase", icons.Pair(c, icons.Rebase, icons.Rebase_dark)).Clicked() {
+			m.tools.rebase.Open = true
+		}
+
+		if m.tools.screen == "diff" {
+			ui.Text(c, "Diff").PadX(8).Color(t.Primary)
+		}
+		ui.Spacer(c)
+	})
+}
+
+func (m *Model) editorTab(c ui.C, screen, label string, icon gfx.Icon) ui.Box {
+	t := c.Theme()
+	tab := ui.TabBase(c, &m.tools.screen, screen, label).Height(28).PadX(8).Gap(8).Radius(4).
+		Disabled(m.tools.busy && screen != "").
+		Hover(ui.Look{}.Background(t.Hover)).Focus(ui.Look{}.Ring(2, t.Ring))
+	if m.tools.screen == screen {
+		tab.Background(t.Selection)
+	}
+	return tab.Children(func() {
+		ui.Icon(c, icon).Size(16, 16)
+		ui.Text(c, label).FontSize(13)
+	})
+}
+
+var themeChoices = []string{"dark", "light"}
+
+func (m *Model) settings(c ui.C) {
+	ui.Modal(c, &m.settingsOpen, "Settings", func() {
+		ui.Column(c).Width(320).Gap(12).Children(func() {
+			ui.Text(c, "Appearance").Bold()
+			before := m.appConfig.Theme
+			ui.Select(c, &m.appConfig.Theme, themeChoices, nil).Label("Theme")
+			if m.appConfig.Theme != before {
+				if m.appConfig.Theme == "light" {
+					m.theme = apptheme.Light()
+				} else {
+					m.theme = apptheme.Dark()
+				}
+				c.After(func() {
+					if err := config.SaveApp(m.configDir, m.appConfig); err != nil {
+						m.err = err.Error()
+					}
+				})
+			}
+			if m.err != "" {
+				ui.Text(c, m.err).Color(c.Theme().Danger)
+			}
+		})
+	}, func() {
+		if ui.Button(c, "OK").Clicked() {
+			m.settingsOpen = false
 		}
 	})
 }
@@ -479,6 +646,10 @@ func (m *Model) applyResult(result *loadResult) {
 		}
 		m.err = ""
 		m.bindBranches(result.snap)
+		m.commit.SetChanges(repo.GroupChanges(result.snap.Changes))
+		if m.showCommit {
+			m.refreshStatus()
+		}
 		if err := m.appConfig.TouchRecent(result.repo.Path, filepath.Base(result.repo.Path), time.Now().UnixMilli()); err == nil {
 			_ = config.SaveApp(m.configDir, m.appConfig)
 		}
@@ -486,7 +657,7 @@ func (m *Model) applyResult(result *loadResult) {
 		m.log.AppendPage(result.commits, result.done)
 	case resultDetails:
 		if result.hash.Equal(m.log.Selected()) {
-			m.log.Details = result.details
+			m.log.SetDetails(result.details)
 		}
 	}
 }

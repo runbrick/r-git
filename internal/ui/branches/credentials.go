@@ -136,7 +136,7 @@ func (d *CredentialsDialog) Page(c ui.C) {
 			ui.TextField(c, &d.password, "Password", "").Secure()
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			response = &credentialAnswer{}
 			d.open = false
 		}

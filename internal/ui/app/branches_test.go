@@ -86,6 +86,8 @@ func TestBranchFlowsOnBareRemote(t *testing.T) {
 	g.Git("push", "-u", "origin", mainBranch)
 
 	m, driver := openDriver(t, g.Dir)
+	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
+	clickControl(t, driver, "Branches")
 	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading && hasLabel(driver, mainBranch+" (current)") })
 
 	// Create a branch from the current one and check it out.
@@ -98,14 +100,20 @@ func TestBranchFlowsOnBareRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	clickControl(t, driver, "Create branch")
-	waitFor(t, driver, func() bool { return strings.TrimSpace(g.Git("branch", "--show-current")) == "topic" })
+	waitFor(t, driver, func() bool {
+		return !m.log.Loading && m.repo.CurrentBranch.Name() == "topic" &&
+			hasLabel(driver, "topic (current)") && strings.TrimSpace(g.Git("branch", "--show-current")) == "topic"
+	})
 
 	// Delete an unmerged branch asks for confirmation, then force-deletes.
 	g.WriteFile("topic.txt", "topic\n")
 	g.Commit("topic commit")
 	g.Git("checkout", "-q", mainBranch)
 	m.refresh()
-	waitFor(t, driver, func() bool { return hasLabel(driver, "topic") && strings.Contains(current(g), mainBranch) })
+	waitFor(t, driver, func() bool {
+		return !m.log.Loading && m.repo.CurrentBranch.Name() == mainBranch &&
+			hasLabel(driver, "topic") && strings.Contains(current(g), mainBranch)
+	})
 	chooseBranch(t, driver, "topic")
 	clickLeftmost(t, driver, "Branch actions")
 	clickControl(t, driver, "Delete")
@@ -172,6 +180,8 @@ func TestStashAndPop(t *testing.T) {
 	g.WriteFile("base.txt", "wip\n")
 	m, driver := openDriver(t, g.Dir)
 	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
+	clickControl(t, driver, "Branches")
+	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
 	clickControl(t, driver, "Open stash")
 	waitFor(t, driver, func() bool { return m.branches.Stash.Open })
 	clickControl(t, driver, "Message")
@@ -217,6 +227,8 @@ func TestCheckoutLocalChangesOffersStash(t *testing.T) {
 	g.WriteFile("base.txt", "dirty\n")
 
 	m, driver := openDriver(t, g.Dir)
+	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
+	clickControl(t, driver, "Branches")
 	waitFor(t, driver, func() bool { return m.repo != nil && hasLabel(driver, "other") })
 	chooseBranch(t, driver, "other")
 	clickLeftmost(t, driver, "Branch actions")
@@ -554,6 +566,7 @@ func TestHeadlessStashDismissal(t *testing.T) {
 			}
 			check(h.Resize(1600, 1000))
 			check(h.WaitFor(func(viva.Snapshot) bool { return m.repo != nil && !m.log.Loading }, 10*time.Second))
+			check(h.ClickLabel("Branches"))
 			check(h.ClickLabel("Open stash"))
 			check(h.WaitFor(func(viva.Snapshot) bool { return m.branches.Stash.Open }, 10*time.Second))
 			check(h.ClickLabel("textfield:Message"))
@@ -621,6 +634,8 @@ func TestShellActionLabelsAreUnique(t *testing.T) {
 	g.Commit("base")
 	m, d := openDriver(t, g.Dir)
 	waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading })
+	clickControl(t, d, "Branches")
+	waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading })
 	assertCounts := func(labels ...string) {
 		t.Helper()
 		counts := map[string]int{}
@@ -650,6 +665,8 @@ func TestCheckoutWithCleanStashRestore(t *testing.T) {
 	g.Git("checkout", "-q", original)
 	g.WriteFile("base.txt", strings.Replace(base, "last", "local last", 1))
 	m, d := openDriver(t, g.Dir)
+	waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading })
+	clickControl(t, d, "Branches")
 	waitFor(t, d, func() bool { return m.repo != nil && hasLabel(d, "other") })
 	chooseBranch(t, d, "other")
 	clickControl(t, d, "Branch actions")

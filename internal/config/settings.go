@@ -26,6 +26,8 @@ const (
 
 // AppSettings is application-wide state. It is stored once, not per repo.
 type AppSettings struct {
+	// Theme selects the application appearance independently of the OS.
+	Theme string `json:"theme"`
 	// ShowLogInEditor keeps the log as the main view. Java default true:
 	// platform/vcs-log/impl/src/com/intellij/vcs/log/impl/VcsLogApplicationSettings.kt:146
 	// (var showInEditor = true), bound to CommonUiProperties.SHOW_IN_EDITOR
@@ -100,6 +102,7 @@ type RecentProject struct {
 // DefaultAppSettings returns Java defaults for a new installation.
 func DefaultAppSettings() AppSettings {
 	return AppSettings{
+		Theme:             "dark",
 		ShowLogInEditor:   true,
 		MaxRecentProjects: 50,
 		Recent:            []RecentProject{},
@@ -119,6 +122,9 @@ func DefaultRepoSettings() RepoSettings {
 // Normalize fills zero-value fields that JSON would otherwise leave blank
 // when an older writer omitted them. Callers that Load get this applied.
 func (s AppSettings) normalized() AppSettings {
+	if s.Theme != "light" && s.Theme != "dark" {
+		s.Theme = "dark"
+	}
 	if s.MaxRecentProjects < 1 {
 		s.MaxRecentProjects = DefaultAppSettings().MaxRecentProjects
 	}
@@ -243,6 +249,7 @@ func samePath(a, b string) bool {
 }
 
 type appV0 struct {
+	Theme             string          `json:"theme"`
 	ShowLogInEditor   *bool           `json:"showLogInEditor"`
 	MaxRecentProjects *int            `json:"maxRecentProjects"`
 	Recent            []RecentProject `json:"recent"`
@@ -255,6 +262,9 @@ func migrateAppV0(raw json.RawMessage) (AppSettings, error) {
 		return AppSettings{}, fmt.Errorf("%w: %s", ErrInvalidSettings, err)
 	}
 	settings := DefaultAppSettings()
+	if old.Theme == "light" || old.Theme == "dark" {
+		settings.Theme = old.Theme
+	}
 	if old.ShowLogInEditor != nil {
 		settings.ShowLogInEditor = *old.ShowLogInEditor
 	}

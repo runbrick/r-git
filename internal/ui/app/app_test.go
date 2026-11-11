@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runbrick/r-git/internal/config"
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/testutil"
 	viva "github.com/vivaui/viva/app"
@@ -26,7 +27,7 @@ func TestOpenRepositoryShowsLogAndDetails(t *testing.T) {
 	for _, appearance := range []viva.Appearance{viva.AppearanceLight, viva.AppearanceDark} {
 		t.Run(appearance.String(), func(t *testing.T) {
 			viva.SetNativeAppearance(appearance)
-			m, driver := openDriver(t, g.Dir)
+			m, driver := openDriverTheme(t, g.Dir, appearance.String())
 			waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading && hasLabel(driver, "new.txt") })
 			if !hasLabel(driver, "add new file for log") || !hasLabel(driver, "Hash") || !hasLabel(driver, "new.txt") {
 				t.Fatalf("log row/details labels missing: %v", labelValues(driver))
@@ -81,7 +82,7 @@ func TestDriverTextFilterBranchFilterAndSelectionDetails(t *testing.T) {
 	for _, appearance := range []viva.Appearance{viva.AppearanceLight, viva.AppearanceDark} {
 		t.Run(appearance.String(), func(t *testing.T) {
 			viva.SetNativeAppearance(appearance)
-			m, driver := openDriver(t, g.Dir)
+			m, driver := openDriverTheme(t, g.Dir, appearance.String())
 			waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading && len(m.log.Details) > 0 })
 			if len(m.log.Commits) != 3 {
 				t.Fatalf("all branches loaded %d commits, want 3", len(m.log.Commits))
@@ -175,7 +176,7 @@ func clickControl(t *testing.T, driver *viva.Driver, label string) {
 	var found bool
 	var x, y float32
 	for _, hit := range driver.Snapshot().Hits {
-		if hit.Label == label && (!found || hit.Bounds.X >= x) {
+		if hit.Label == label && (!found || hit.Bounds.X+hit.Bounds.Width/2 >= x) {
 			found = true
 			x, y = hit.Bounds.X+hit.Bounds.Width/2, hit.Bounds.Y+hit.Bounds.Height/2
 		}
@@ -236,7 +237,18 @@ func TestDriverScrollLoadsNextPageWithoutRebuildingGraph(t *testing.T) {
 
 func openDriver(t *testing.T, path string) (*Model, *viva.Driver) {
 	t.Helper()
-	m, err := New(filepath.Join(t.TempDir(), "config"), path)
+	return openDriverTheme(t, path, "dark")
+}
+
+func openDriverTheme(t *testing.T, path, theme string) (*Model, *viva.Driver) {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "config")
+	settings := config.DefaultAppSettings()
+	settings.Theme = theme
+	if err := config.SaveApp(dir, settings); err != nil {
+		t.Fatal(err)
+	}
+	m, err := New(dir, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +264,10 @@ func waitFor(t *testing.T, driver *viva.Driver, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := driver.Pump(); err != nil {
+		// A fast initial error can publish before NewDriver binds its wake
+		// handler. Deliver the loading spinner's scheduled frame as the real
+		// window and headless runner do, in addition to background wakes.
+		if err := driver.Advance(16 * time.Millisecond); err != nil {
 			t.Fatal(err)
 		}
 		if condition() {
@@ -266,6 +281,11 @@ func waitFor(t *testing.T, driver *viva.Driver, condition func() bool) {
 func hasLabel(driver *viva.Driver, value string) bool {
 	for _, label := range driver.Snapshot().Labels {
 		if strings.Contains(label.Value, value) {
+			return true
+		}
+	}
+	for _, hit := range driver.Snapshot().Hits {
+		if strings.Contains(hit.Label, value) {
 			return true
 		}
 	}

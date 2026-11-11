@@ -13,7 +13,9 @@ import (
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/ops"
 	"github.com/runbrick/r-git/internal/git/repo"
+	"github.com/runbrick/r-git/internal/ui/controls"
 	diffview "github.com/runbrick/r-git/internal/ui/diff"
+	"github.com/runbrick/r-git/internal/ui/icons"
 	mergeview "github.com/runbrick/r-git/internal/ui/merge"
 	rebaseview "github.com/runbrick/r-git/internal/ui/rebase"
 	"github.com/vivaui/viva/ui"
@@ -93,18 +95,24 @@ func (m *Model) toolsPage(c ui.C) bool {
 	if m.repo != nil && m.repo.State == model.StateRebasing {
 		ui.Row(c).FillWidth().Pad(8).Gap(8).Children(func() {
 			ui.Text(c, "Rebase in progress").Grow(1)
-			if ui.Button(c, "Continue rebase").Disabled(m.tools.busy).Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Right, icons.Right_dark), "Continue rebase").Disabled(m.tools.busy).Clicked() {
 				c.After(func() { m.controlRebase("continue") })
 			}
-			if ui.Button(c, "Skip commit").Disabled(m.tools.busy).Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Down, icons.Down_dark), "Skip commit").Disabled(m.tools.busy).Clicked() {
 				c.After(func() { m.controlRebase("skip") })
 			}
-			if ui.Button(c, "Abort rebase").Disabled(m.tools.busy).Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), "Abort rebase").Disabled(m.tools.busy).Clicked() {
 				c.After(func() { m.controlRebase("abort") })
 			}
 		})
 	}
+	if m.tools.screen == "rebase" && !m.tools.rebase.Open {
+		m.tools.screen = ""
+	}
 	switch m.tools.screen {
+	case "rebase":
+		m.tools.rebase.Pane(c)
+		return true
 	case "diff":
 		m.tools.diff.Page(c)
 		return true
@@ -113,17 +121,6 @@ func (m *Model) toolsPage(c ui.C) bool {
 		return true
 	}
 	return false
-}
-func (m *Model) toolsToolbar(c ui.C) {
-	if m.repo == nil {
-		return
-	}
-	if ui.Button(c, "Conflicts").Disabled(m.tools.busy).Clicked() {
-		c.After(m.showConflicts)
-	}
-	if ui.Button(c, "Interactive rebase").Disabled(m.tools.busy).Clicked() {
-		m.tools.rebase.Open = true
-	}
 }
 
 // runWorkflow uses the shell's owned worker group, cancellation, publication

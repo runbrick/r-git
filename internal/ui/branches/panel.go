@@ -8,6 +8,8 @@ import (
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/ops"
 	"github.com/runbrick/r-git/internal/git/repo"
+	"github.com/runbrick/r-git/internal/ui/controls"
+	"github.com/runbrick/r-git/internal/ui/icons"
 	"github.com/vivaui/viva/ui"
 )
 
@@ -153,41 +155,42 @@ func (p *Panel) Load(snap repo.Snapshot, aheadBehind map[string][2]int, favorite
 func (p *Panel) Page(c ui.C) Request {
 	p.page = c
 	p.rebuildVisible()
+	p.tree.RowHeight = 22
 	p.tree.Node = p.node
 	p.tree.Key = p.key
 	var req Request
 	ui.Column(c).Fill().Gap(8).Pad(8).Children(func() {
 		ui.Text(c, "Branches").Bold()
 		ui.TextField(c, &p.Filter, "Find branch", "Type to filter")
-		ui.Column(c).FillWidth().Gap(4).Children(func() {
-			if ui.Button(c, "Fetch remote").Clicked() {
+		ui.Row(c).FillWidth().Gap(4).Children(func() {
+			if controls.IconButton(c, icons.Pair(c, icons.Fetch, icons.Fetch_dark), "Fetch remote").Clicked() {
 				req.Action = ActionFetch
 			}
-			if ui.Button(c, "Pull changes").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Pull, icons.Pull_dark), "Pull changes").Clicked() {
 				req.Action = ActionPull
 			}
-			if ui.Button(c, "Push branches").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Push, icons.Push_dark), "Push branches").Clicked() {
 				req.Action = ActionPush
 			}
 		})
 		ui.Row(c).FillWidth().Gap(4).Children(func() {
-			if ui.Button(c, "Stash").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Stash, icons.Stash_dark), "Stash").Clicked() {
 				req.Action = ActionStash
 			}
-			if ui.Button(c, "Remotes").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Remotes, icons.Remotes_dark), "Remotes").Clicked() {
 				req.Action = ActionRemotes
 			}
 		})
 		if p.Error != "" {
 			ui.Text(c, p.Error).Color(c.Theme().Danger).FontSize(12)
 		}
-		tree := ui.Column(c).Grow(1).Hit(ui.ID(c), "Branches").Children(func() {
+		tree := ui.Column(c).Grow(1).Hit(ui.ID(c), "Branches tree").Children(func() {
 			ui.Tree(c, &p.tree, len(p.visible), p.label, p.row).Grow(1)
 		})
 		ui.ContextMenu(c, tree, func(menu *ui.MenuItems) {
 			req = p.menu(menu, req)
 		})
-		anchor := ui.Button(c, "Branch actions")
+		anchor := controls.IconButton(c, icons.Pair(c, icons.More, icons.More_dark), "Branch actions")
 		if anchor.Clicked() {
 			p.actions = !p.actions
 		}
