@@ -215,7 +215,7 @@ func TestPushOperation(t *testing.T) {
 	pusher := ops.NewPusher(runner)
 
 	// Test basic push
-	res, err := pusher.Push(ctx, localDir, "origin", "refs/heads/master:refs/heads/master", false)
+	res, err := pusher.Push(ctx, localDir, "origin", "refs/heads/master:refs/heads/master", false, false)
 	if err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}

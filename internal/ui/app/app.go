@@ -10,9 +10,11 @@ import (
 	"github.com/runbrick/r-git/internal/git/command"
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/repo"
+	branchui "github.com/runbrick/r-git/internal/ui/branches"
 	commitview "github.com/runbrick/r-git/internal/ui/commit"
 	logview "github.com/runbrick/r-git/internal/ui/log"
 	viva "github.com/vivaui/viva/app"
+	"github.com/vivaui/viva/gfx"
 	"github.com/vivaui/viva/ui"
 )
 
@@ -26,6 +28,7 @@ const (
 	resultDetails
 	resultWorkflow
 	resultCommit
+	resultBranch
 )
 
 type loadResult struct {
@@ -48,22 +51,27 @@ type loadResult struct {
 	toast      string
 	committed  bool
 	pushAfter  bool
+	note       string
+	snap       repo.Snapshot
+	ui         *branchui.UIEvent
 }
 
 // Model owns the application shell and coordinates repository work.
 type Model struct {
-	configDir  string
-	appConfig  config.AppSettings
-	repoConfig config.RepoSettings
-	initial    string
-	pathEntry  string
-	repo       *repo.Repo
-	log        logview.View
-	commit     commitview.View
-	showCommit bool
-	branches   []string
-	choices    []string
-	err        string
+	configDir     string
+	appConfig     config.AppSettings
+	repoConfig    config.RepoSettings
+	initial       string
+	pathEntry     string
+	repo          *repo.Repo
+	log           logview.View
+	commit        commitview.View
+	showCommit    bool
+	branches      branchui.Session
+	runner        *command.Runner
+	localBranches []string
+	choices       []string
+	err           string
 
 	OnFetch    func()
 	OnPull     func()
@@ -81,6 +89,10 @@ type Model struct {
 	startQueued bool
 	closed      bool
 	tools       tools
+	gitCancels  []context.CancelFunc
+	// seenFrame is closed when the first Page call returns. The headless driver
+	// binds the invalidator after that return, so the first open waits for it.
+	seenFrame chan struct{}
 }
 
 // New loads settings. Repository I/O starts after the window's first paint.
@@ -89,7 +101,7 @@ func New(configDir, initialPath string) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{configDir: configDir, appConfig: settings, initial: initialPath, pathEntry: initialPath}
+	m := &Model{configDir: configDir, appConfig: settings, initial: initialPath, pathEntry: initialPath, seenFrame: make(chan struct{})}
 	m.log.Branch = "All branches"
 	m.log.Choices = []string{"All branches"}
 	m.log.Done = initialPath == ""
@@ -103,6 +115,9 @@ func New(configDir, initialPath string) (*Model, error) {
 			m.OnShowDiff(hash, path)
 		}
 	}
+	m.OnFetch = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionFetch}, m.startGit, m.refresh) }
+	m.OnPull = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionPull}, m.startGit, m.refresh) }
+	m.OnPush = func() { m.branches.Handle(branchui.Request{Action: branchui.ActionPush}, m.startGit, m.refresh) }
 	return m, nil
 }
 
@@ -112,12 +127,17 @@ func Run(configDir, initialPath string) error {
 	if err != nil {
 		return err
 	}
-	return viva.Run(m.config())
+	page := ui.NewPage(ui.PageConfig{View: m.Page, Invalidator: &m.invalidator})
+	var canvas gfx.Canvas
+	return viva.RunCanvas(page.Config(viva.Config{Title: "r-git", Width: 1400, Height: 900,
+		OnWake:   m.applyPending,
+		OnClosed: func() { m.stopWorkers() },
+	}), &canvas)
 }
 
 func (m *Model) config() viva.Config {
 	page := ui.NewPage(ui.PageConfig{View: m.Page, Invalidator: &m.invalidator})
-	return page.Config(viva.Config{Title: "r-git", Width: 1120, Height: 760,
+	return page.Config(viva.Config{Title: "r-git", Width: 1400, Height: 900,
 		OnWake:   m.applyPending,
 		OnClosed: func() { m.stopWorkers() },
 	})
@@ -134,18 +154,35 @@ func (m *Model) Page(c ui.C) {
 		m.toolbar(c)
 		if m.repo == nil {
 			m.startPage(c)
-			return
-		}
-		if m.toolsPage(c) {
-			return
-		}
-		if m.showCommit {
+		} else if m.toolsPage(c) {
+		} else if m.showCommit {
 			m.commit.Page(c)
-			return
+		} else {
+			ui.Row(c).Fill().Children(func() {
+				ui.Column(c).Width(320).FillHeight().Background(theme.Card).Border(1, theme.Border).Children(func() {
+					m.branches.Panel.Page(c)
+					if ui.Button(c, "Open stash").Clicked() {
+						c.After(func() { m.branches.Handle(branchui.Request{Action: branchui.ActionStash}, m.startGit, m.refresh) })
+					}
+				})
+				m.log.Page(c)
+			})
 		}
-		m.log.Page(c)
+		m.branches.Overlays(c)
+		c.After(func() { m.branches.AfterPaint(m.startGit, m.refresh) })
 	})
 	m.tools.rebase.Page(c)
+	m.noteFrame()
+}
+
+// noteFrame lets an open that the first paint armed start. The driver binds
+// the invalidator after this call returns.
+func (m *Model) noteFrame() {
+	select {
+	case <-m.seenFrame:
+	default:
+		close(m.seenFrame)
+	}
 }
 
 func (m *Model) toolbar(c ui.C) {
@@ -223,11 +260,21 @@ func (m *Model) startPage(c ui.C) {
 		}
 		if m.log.Loading {
 			ui.Text(c, "Loading repository...").FontSize(12).Muted()
+			// The spinner asks for the next frame. Headless WaitFor delivers that
+			// frame through OnWake, which applies a result a cross-thread
+			// Invalidate did not deliver on Linux.
+			ui.Spinner(c)
 		}
 	})
 }
 
 func (m *Model) startOpen(path string) {
+	m.prepareOpen(path)
+}
+
+// prepareOpen loads path. The first call waits until the first paint returns,
+// which is when the driver binds the invalidator.
+func (m *Model) prepareOpen(path string) {
 	m.resetTools()
 	path = filepath.Clean(path)
 	previous := m.cancel
@@ -241,26 +288,40 @@ func (m *Model) startOpen(path string) {
 	m.workers.Add(1)
 	go func() {
 		defer m.workers.Done()
-		out := loadResult{kind: resultOpen, generation: generation, path: path}
-		runner, err := command.New()
-		if err == nil {
-			out.repo, err = repo.OpenWithExecutor(ctx, path, runner)
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.seenFrame:
 		}
-		if err == nil {
-			out.ordered, err = out.repo.ParentsOrderedAll(ctx)
-		}
-		if err == nil {
-			out.graph, out.graphIndex, err = logview.NewGraphRows(out.ordered)
-		}
-		if err == nil {
-			out.commits, err = out.repo.Log(ctx, repo.LogQuery{MaxCount: pageSize, All: true})
-		}
-		if err == nil {
-			out.done = len(out.commits) < pageSize
-		}
-		out.err = err
+		out := m.loadOpen(ctx, path, generation)
 		m.publish(&out)
 	}()
+}
+
+func (m *Model) loadOpen(ctx context.Context, path string, generation uint64) loadResult {
+	out := loadResult{kind: resultOpen, generation: generation, path: path}
+	runner, err := command.New()
+	if err == nil {
+		out.repo, err = repo.OpenWithExecutor(ctx, path, runner)
+	}
+	if err == nil {
+		out.ordered, err = out.repo.ParentsOrderedAll(ctx)
+	}
+	if err == nil {
+		out.graph, out.graphIndex, err = logview.NewGraphRows(out.ordered)
+	}
+	if err == nil {
+		out.commits, err = out.repo.Log(ctx, repo.LogQuery{MaxCount: pageSize, All: true})
+	}
+	if err == nil {
+		out.done = len(out.commits) < pageSize
+	}
+	out.err = err
+	if err == nil {
+		out.snap, err = out.repo.Snapshot(ctx)
+		out.err = err
+	}
+	return out
 }
 
 func (m *Model) loadPage(branch string, skip int) {
@@ -334,7 +395,11 @@ func (m *Model) changeBranch(branch string) {
 		if err == nil {
 			commits, err = repository.Log(ctx, query)
 		}
-		m.publish(&loadResult{kind: resultOpen, generation: generation, path: repository.Path, branch: branch, repo: repository, ordered: ordered, graph: graphRows, graphIndex: graphIndex, commits: commits, done: len(commits) < pageSize, err: err})
+		var snap repo.Snapshot
+		if err == nil {
+			snap, err = repository.Snapshot(ctx)
+		}
+		m.publish(&loadResult{kind: resultOpen, generation: generation, path: repository.Path, branch: branch, repo: repository, ordered: ordered, graph: graphRows, graphIndex: graphIndex, commits: commits, done: len(commits) < pageSize, snap: snap, err: err})
 	}()
 }
 
@@ -373,6 +438,10 @@ func (m *Model) applyResult(result *loadResult) {
 		m.applyCommit(result)
 		return
 	}
+	if result.kind == resultBranch {
+		m.applyBranch(result)
+		return
+	}
 	if result.err != nil {
 		if result.kind == resultOpen && m.repo == nil {
 			m.log.Loading = false
@@ -387,14 +456,14 @@ func (m *Model) applyResult(result *loadResult) {
 		m.repo = result.repo
 		m.repoConfig, _ = config.LoadRepo(m.configDir, result.repo.Path)
 		m.pathEntry = result.repo.Path
-		m.branches, m.choices = nil, []string{"All branches"}
+		m.localBranches, m.choices = nil, []string{"All branches"}
 		for _, branch := range result.repo.Branches {
 			if branch.Ref.Kind() == model.KindLocalBranch {
-				m.branches = append(m.branches, branch.Ref.Name())
+				m.localBranches = append(m.localBranches, branch.Ref.Name())
 				m.choices = append(m.choices, branch.Ref.Name())
 			}
 		}
-		m.log.Choices, m.log.Branches = m.choices, m.branches
+		m.log.Choices, m.log.Branches = m.choices, m.localBranches
 		if result.branch == "" {
 			m.log.Branch = "All branches"
 		} else {
@@ -409,6 +478,7 @@ func (m *Model) applyResult(result *loadResult) {
 			m.loadDetails(result.commits[0].Hash)
 		}
 		m.err = ""
+		m.bindBranches(result.snap)
 		if err := m.appConfig.TouchRecent(result.repo.Path, filepath.Base(result.repo.Path), time.Now().UnixMilli()); err == nil {
 			_ = config.SaveApp(m.configDir, m.appConfig)
 		}
@@ -444,6 +514,68 @@ func (m *Model) applyCommit(result *loadResult) {
 	}
 }
 
+func (m *Model) applyBranch(result *loadResult) {
+	if result.ui != nil {
+		m.branches.ApplyUI(*result.ui)
+		if result.ui.Refresh {
+			m.refresh()
+		}
+		return
+	}
+	if result.err != nil {
+		m.branches.Panel.Error = result.err.Error()
+		return
+	}
+	m.bindBranches(result.snap)
+}
+
+func (m *Model) bindBranches(snap repo.Snapshot) {
+	if m.runner == nil {
+		runner, err := command.New()
+		if err != nil {
+			m.branches.Panel.Error = err.Error()
+			return
+		}
+		m.runner = runner
+	}
+	m.branches.SetPublisher(m.publishUI)
+	m.branches.SetRunner(m.startGit, m.refresh)
+	ahead := map[string][2]int{}
+	if name := snap.CurrentBranch.Name(); name != "" {
+		ahead[name] = [2]int{snap.Ahead, snap.Behind}
+	}
+	m.branches.Bind(m.repo, m.runner, m.repoConfig, &m.invalidator)
+	m.branches.SetSnapshot(snap, ahead)
+}
+
+func (m *Model) publishUI(event branchui.UIEvent) {
+	copied := event
+	m.publish(&loadResult{kind: resultBranch, generation: m.generation, ui: &copied})
+}
+
+func (m *Model) startGit(work func(context.Context)) {
+	if m.repo == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.gitCancels = append(m.gitCancels, cancel)
+	m.mu.Unlock()
+	m.workers.Add(1)
+	go func() {
+		defer m.workers.Done()
+		defer cancel()
+		work(ctx)
+	}()
+}
+
+func (m *Model) refresh() {
+	if m.repo == nil {
+		return
+	}
+	m.startOpen(m.repo.Path)
+}
+
 func (m *Model) returnToPicker() {
 	m.resetTools()
 	m.cancelCurrent()
@@ -461,8 +593,12 @@ func (m *Model) stopWorkers() {
 	m.mu.Lock()
 	m.closed = true
 	m.pending = nil
+	cancels := append([]context.CancelFunc(nil), m.gitCancels...)
 	m.mu.Unlock()
 	m.cancelCurrent()
+	for _, cancel := range cancels {
+		cancel()
+	}
 	m.workers.Wait()
 }
 

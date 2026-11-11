@@ -11,24 +11,31 @@ import (
 )
 
 type View struct {
-	Conflicts   []ops.Conflict
-	Path        string
-	Content     ops.ConflictContent
-	Merge       *textdiff.Merge
-	Result      string
-	Busy        bool
-	Error       string
-	OnSelect    func(ops.Conflict)
-	OnResolve   func(string, []byte)
-	OnClose     func()
+	Conflicts []ops.Conflict
+	Path      string
+	Content   ops.ConflictContent
+	Merge     *textdiff.Merge
+	Result    string
+	Busy      bool
+	Error     string
+	OnSelect  func(ops.Conflict)
+	OnResolve func(string, []byte)
+	OnClose   func()
+	// OnEdit returns the workflow request current when the user edits the result.
+	OnEdit      func() uint64
 	left, right diffview.View
 	manual      bool
+	resultField ui.Field
+	// Edit is the workflow request current when the user last changed the
+	// result. A file load requested earlier must not replace that result.
+	Edit uint64
 }
 
 func (v *View) SetFile(path string, content ops.ConflictContent) {
 	v.Path, v.Content = path, content
 	v.Merge = textdiff.NewMerge(content.Base, content.Left, content.Right)
 	v.Result = v.Merge.Result()
+	v.resultField.SetText(v.Result)
 	v.manual = false
 	v.Error = ""
 	v.Busy = false
@@ -38,12 +45,20 @@ func (v *View) SetFile(path string, content ops.ConflictContent) {
 	v.right.SetContent(content.RightLabel, content.Right, content.Right)
 }
 
+func (v *View) noteEdit() {
+	v.manual = true
+	if v.OnEdit != nil {
+		v.Edit = v.OnEdit()
+	}
+}
+
 func (v *View) choose(index int, side textdiff.Side) {
 	if v.manual || v.Merge == nil || index < 0 || index >= len(v.Merge.Chunks) {
 		return
 	}
 	v.Merge.Chunks[index].Choice = side
 	v.Result = v.Merge.Result()
+	v.resultField.SetText(v.Result)
 }
 
 func (v *View) Page(c ui.C) {
@@ -79,15 +94,18 @@ func (v *View) Page(c ui.C) {
 					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() { ui.Text(c, v.Content.LeftLabel).Bold(); v.left.Content(c, "Yours content") })
 					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() {
 						ui.Text(c, "Result").Bold()
-						before := v.Result
-						ui.TextArea(c, &v.Result, "Merge result", "").Fill().Disabled(v.Busy)
-						if before != v.Result {
+						area := ui.TextArea(c, &v.resultField, "Merge result", "").Fill().Disabled(v.Busy)
+						// TextArea bound to a string keeps its own copy and writes
+						// that copy back on the next frame, which replaced an
+						// Accept click with the previous result.
+						if area.Changed() {
+							v.Result = v.resultField.Text()
 							v.manual = true
 						}
 					})
 					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() { ui.Text(c, v.Content.RightLabel).Bold(); v.right.Content(c, "Theirs content") })
 				})
-				ui.Scroll(c).FillWidth().Height(160).Gap(4).Children(func() {
+				ui.Scroll(c).FillWidth().MaxHeight(160).Gap(4).Children(func() {
 					for i, chunk := range v.Merge.Chunks {
 						index := i
 						ui.Row(c.KeyInt(i)).FillWidth().Gap(8).Items(ui.Center).Children(func() {
@@ -111,21 +129,26 @@ func (v *View) Page(c ui.C) {
 				ui.Row(c).FillWidth().Gap(8).Children(func() {
 					if ui.Button(c, "Accept Yours").Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Left
-						v.manual = true
+						v.resultField.SetText(v.Result)
+						v.noteEdit()
 					}
 					if ui.Button(c, "Accept Theirs").Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Right
-						v.manual = true
+						v.resultField.SetText(v.Result)
+						v.noteEdit()
 					}
 					if ui.Button(c, "Apply non-conflicting changes").Disabled(v.Busy || v.manual).Clicked() {
 						v.Merge.ApplyNonConflicting()
 						v.Result = v.Merge.Result()
+						v.resultField.SetText(v.Result)
+						v.noteEdit()
 					}
 					if v.manual {
 						ui.Text(c, "Result edited manually").Muted()
 						if ui.Button(c, "Reset result to chunk choices").Disabled(v.Busy).Clicked() {
 							v.manual = false
 							v.Result = v.Merge.Result()
+							v.resultField.SetText(v.Result)
 						}
 					}
 					ui.Spacer(c)

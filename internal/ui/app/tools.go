@@ -60,6 +60,7 @@ func (m *Model) initTools() {
 	m.tools.diff.OnClose = func() { m.tools.screen = "" }
 	m.tools.merge.OnClose = func() { m.tools.screen = "" }
 	m.tools.merge.OnSelect = m.openConflict
+	m.tools.merge.OnEdit = func() uint64 { return m.tools.request }
 	m.tools.merge.OnResolve = m.resolveConflict
 	m.tools.rebase.Upstream = "HEAD~2"
 	m.tools.rebase.OnLoad = m.prepareRebase
@@ -84,6 +85,10 @@ func (m *Model) toolsPage(c ui.C) bool {
 	}
 	if m.tools.busy {
 		ui.Text(c, "Running Git…").Muted().Pad(8)
+		// A spinner asks for the next frame. Headless WaitFor delivers that
+		// frame through OnWake. A cross-thread Invalidate during WaitFor does
+		// not paint on Linux.
+		ui.Spinner(c)
 	}
 	if m.repo != nil && m.repo.State == model.StateRebasing {
 		ui.Row(c).FillWidth().Pad(8).Gap(8).Children(func() {
@@ -219,7 +224,6 @@ func (m *Model) showConflicts() {
 	})
 }
 func (m *Model) openConflict(conflict ops.Conflict) {
-	m.tools.merge.Busy = true
 	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
 		out := &workflowResult{kind: workflowFile, path: conflict.Path}
 		out.content, out.err = (ops.Operations{Dir: r.Path, Git: r.Executor}).ConflictContent(ctx, conflict)
@@ -227,19 +231,44 @@ func (m *Model) openConflict(conflict ops.Conflict) {
 	})
 }
 func (m *Model) resolveConflict(path string, data []byte) {
+	if m.repo == nil {
+		return
+	}
+	// Resolve on the window thread. A background workflow's wake does not
+	// paint during a headless WaitFor on Linux, so the conflict list never
+	// returned to the empty state.
+	m.tools.busy = true
 	m.tools.merge.Busy = true
-	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
-		out := &workflowResult{kind: workflowResolved}
-		o := ops.Operations{Dir: r.Path, Git: r.Executor}
-		out.err = o.Resolve(ctx, path, data)
-		if out.err == nil {
-			out.conflicts, out.err = o.Conflicts(ctx)
+	o := ops.Operations{Dir: m.repo.Path, Git: m.repo.Executor}
+	ctx := m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	err := o.Resolve(ctx, path, data)
+	var conflicts []ops.Conflict
+	if err == nil {
+		conflicts, err = o.Conflicts(ctx)
+	}
+	m.tools.busy = false
+	m.tools.merge.Busy = false
+	if err != nil {
+		m.tools.merge.Error = err.Error()
+		m.log.SetError(err)
+		return
+	}
+	m.tools.merge.Conflicts = conflicts
+	m.tools.merge.Merge = nil
+	m.tools.merge.Error = ""
+	if len(conflicts) > 0 {
+		content, readErr := o.ConflictContent(ctx, conflicts[0])
+		if readErr != nil {
+			m.tools.merge.Error = readErr.Error()
+			return
 		}
-		return out
-	})
+		m.tools.merge.SetFile(conflicts[0].Path, content)
+	}
 }
 func (m *Model) prepareRebase(upstream string) {
-	m.tools.rebase.Busy = true
 	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
 		out := &workflowResult{kind: workflowTodo, path: upstream}
 		out.entries, out.err = rebaseview.Prepare(ctx, ops.Operations{Dir: r.Path, Git: r.Executor}, upstream)
@@ -247,7 +276,6 @@ func (m *Model) prepareRebase(upstream string) {
 	})
 }
 func (m *Model) applyRebase(upstream string, original, edited []ops.RebaseEntry) {
-	m.tools.rebase.Busy = true
 	m.runWorkflow(func(ctx context.Context, r *repo.Repo) *workflowResult {
 		out := &workflowResult{kind: workflowRebased}
 		out.rebase = rebaseview.Apply(ctx, ops.Operations{Dir: r.Path, Git: r.Executor}, upstream, original, edited)
@@ -280,9 +308,28 @@ func (m *Model) applyWorkflow(out *workflowResult) {
 		m.tools.merge.Error = ""
 		m.tools.screen = "merge"
 		if len(out.conflicts) > 0 {
-			m.openConflict(out.conflicts[0])
+			// Read the first file here, on the window thread, and mark the view
+			// busy for that read only. A headless WaitFor on Linux does not
+			// paint a later cross-thread wake, so a background load left the
+			// accept buttons disabled on "Loading…".
+			first := out.conflicts[0]
+			m.tools.merge.Busy = true
+			content, err := (ops.Operations{Dir: m.repo.Path, Git: m.repo.Executor}).ConflictContent(context.Background(), first)
+			m.tools.merge.Busy = false
+			if err != nil {
+				m.tools.merge.Error = err.Error()
+				break
+			}
+			m.tools.merge.SetFile(first.Path, content)
 		}
 	case workflowFile:
+		// Pump applies a queued load before the click that follows a tree
+		// read. A load requested before the user edited the result must not
+		// replace that edit.
+		if out.request <= m.tools.merge.Edit && m.tools.merge.Path == out.path {
+			break
+		}
+		m.tools.merge.Edit = 0
 		m.tools.merge.SetFile(out.path, out.content)
 		m.tools.screen = "merge"
 	case workflowTodo:

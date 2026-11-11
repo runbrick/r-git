@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/ops"
@@ -62,7 +64,7 @@ func (m *Model) handleCommitRequest(req commitview.Request) {
 				SignOff: req.SignOff,
 				Author:  req.Author,
 			}
-			if !sameSet(req.Paths, stagedPaths(status.Changes)) {
+			if !sameSet(req.Paths, stagedPaths(status.Changes)) && !mergeInProgress(repository.Path) {
 				opts.Paths = append([]string{}, req.Paths...)
 			}
 			hash, err := service.Commit(ctx, opts)
@@ -110,6 +112,16 @@ func (m *Model) fillChanges(ctx context.Context, repository *repo.Repo, out *loa
 	if err == nil && len(commits) > 0 {
 		out.message = commits[0].Message
 	}
+}
+
+// mergeInProgress reports a merge git has not finished. The open
+// repository's State stays NORMAL until the next snapshot, so the
+// commit that concludes a conflicted merge has to look at MERGE_HEAD.
+// git commit --only refuses to record that merge and leaves the
+// message file behind.
+func mergeInProgress(repoPath string) bool {
+	_, err := os.Stat(filepath.Join(repoPath, ".git", "MERGE_HEAD"))
+	return err == nil
 }
 
 func untrackedAmong(paths []string, changes []model.FileChange) []string {

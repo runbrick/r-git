@@ -121,11 +121,15 @@ func NewPusher(runner *command.Runner) *Pusher {
 	return &Pusher{runner: runner}
 }
 
-// Push executes a git push operation.
-func (p *Pusher) Push(ctx context.Context, repoPath, remote string, refspec string, force bool) ([]PushNativeResult, error) {
+// Push executes a git push operation. setUpstream sets the local branch's
+// upstream to the pushed remote branch when the refspec is a branch mapping.
+func (p *Pusher) Push(ctx context.Context, repoPath, remote string, refspec string, force, setUpstream bool) ([]PushNativeResult, error) {
 	args := []string{"--porcelain"}
 	if force {
 		args = append(args, "--force-with-lease")
+	}
+	if setUpstream {
+		args = append(args, "--set-upstream")
 	}
 	args = append(args, remote, refspec)
 
