@@ -34,13 +34,13 @@ func (m *Model) handleCommitRequest(req commitview.Request) {
 		switch req.Kind {
 		case commitview.RequestStage:
 			out.err = service.Stage(ctx, req.Paths)
-			out.toast = "Staged"
+			out.toast = m.Text().Staged
 		case commitview.RequestUnstage:
 			out.err = service.Unstage(ctx, req.Paths)
-			out.toast = "Unstaged"
+			out.toast = m.Text().Unstaged
 		case commitview.RequestDiscard:
 			out.err = service.Discard(ctx, req.Paths)
-			out.toast = "Discarded"
+			out.toast = m.Text().Discarded
 		case commitview.RequestCommit:
 			// Partial commit, matching git4idea: stage only checked paths
 			// that are still untracked (git commit --only refuses those),

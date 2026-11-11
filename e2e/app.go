@@ -34,10 +34,16 @@ type app struct {
 
 func startApp(t *testing.T, repo, home, configDir string) *app {
 	t.Helper()
+	return startAppLanguage(t, repo, home, configDir, "en")
+}
+
+func startAppLanguage(t *testing.T, repo, home, configDir, language string) *app {
+	t.Helper()
 	bin := buildBinary(t)
 	cmd := exec.Command(bin, repo)
 	cmd.Env = append(os.Environ(),
 		"VIVA_HEADLESS=1",
+		"R_GIT_LANG="+language,
 		"HOME="+home,
 		"USERPROFILE="+home,
 		"R_GIT_CONFIG_DIR="+configDir,

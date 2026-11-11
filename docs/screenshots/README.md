@@ -44,3 +44,12 @@ form design remain follow-up work for PR13.
 The log column regression is also covered by an `app.Driver` test at 1200,
 1400, and 1600 logical pixels, including resizing back down. It checks the
 Author, Date, and Hash header/cell ranges, row bounds, and long-subject ellipsis.
+
+PR14 language evidence uses the demo repository at 1400 x 900. Both images
+select the `Add login` commit after its changed file has loaded; every image
+reported zero layout issues from the headless `layout` command.
+
+| Language | Dark | Light |
+| --- | --- | --- |
+| 简体中文 | [zh-CN-dark.png](zh-CN-dark.png) | [zh-CN-light.png](zh-CN-light.png) |
+| English | [en-dark.png](en-dark.png) | [en-light.png](en-light.png) |

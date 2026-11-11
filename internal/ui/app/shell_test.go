@@ -50,135 +50,145 @@ func TestLogRowsMatchGraphAndHeadsHaveNoUpwardEdge(t *testing.T) {
 }
 
 func TestLogToolbarTextFitsAtWindowWidths(t *testing.T) {
-	g := testutil.NewDateSkewedHistory(t)
-	m, d := openDriver(t, g.Dir)
-	waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading })
-	for _, width := range []int{1200, 1400, 1600} {
-		for _, date := range []string{"Any date", "Before today", "Last 30 days"} {
-			t.Run(fmt.Sprintf("%d/%s", width, date), func(t *testing.T) {
-				m.log.Date = date
-				if err := d.Resize(width, 900); err != nil {
-					t.Fatal(err)
+	for _, language := range []string{"en", "zh-CN"} {
+		t.Run(language, func(t *testing.T) {
+			g := testutil.NewDateSkewedHistory(t)
+			m, d := openDriver(t, g.Dir)
+			m.SetLanguage(language)
+			waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading })
+			for _, width := range []int{1200, 1400, 1600} {
+				for _, date := range []string{"Any date", "Before today", "Last 30 days"} {
+					t.Run(fmt.Sprintf("%d/%s", width, date), func(t *testing.T) {
+						m.log.Date = date
+						if err := d.Resize(width, 900); err != nil {
+							t.Fatal(err)
+						}
+						s := d.Snapshot()
+						for _, tc := range []struct{ control, text string }{
+							{m.Text().Filter, m.Text().TextOrHash}, {m.Text().Regex, ".*"}, {m.Text().MatchCase, "Cc"},
+							{m.Text().BranchFilter, m.Text().AllBranches}, {m.Text().User, m.Text().User}, {m.Text().Date, m.Text().DateChoice(date)},
+						} {
+							var bounds gfx.Rect
+							for _, hit := range s.Hits {
+								if hit.Label == tc.control {
+									bounds = hit.Bounds
+									break
+								}
+							}
+							found := false
+							for i, text := range s.Texts {
+								if text.Value != tc.text || text.Bounds.Y < bounds.Y || text.Bounds.Y >= bounds.Y+bounds.Height {
+									continue
+								}
+								found = true
+								if s.TextWidths[i] > text.Bounds.Width+0.5 || text.Bounds.X < bounds.X || text.Bounds.X+s.TextWidths[i] > bounds.X+bounds.Width+0.5 {
+									t.Errorf("%s text needs %.1fpx, text bounds %v, control %v", tc.control, s.TextWidths[i], text.Bounds, bounds)
+								}
+								if text.Bounds.X+s.TextWidths[i] > float32(width) {
+									t.Errorf("%s extends past window", tc.control)
+								}
+								if text.HasClip && (text.Bounds.X < text.ClipOf.X || text.Bounds.X+s.TextWidths[i] > text.ClipOf.X+text.ClipOf.Width+0.5) {
+									t.Errorf("%s text is clipped by %v", tc.control, text.ClipOf)
+								}
+							}
+							if !found {
+								t.Errorf("missing %s text %q", tc.control, tc.text)
+							}
+						}
+					})
 				}
-				s := d.Snapshot()
-				for _, tc := range []struct{ control, text string }{
-					{"Filter", "Text or hash"}, {"Regex", ".*"}, {"Match case", "Cc"},
-					{"Branch", "All branches"}, {"User", "User"}, {"Date", date},
-				} {
-					var bounds gfx.Rect
-					for _, hit := range s.Hits {
-						if hit.Label == tc.control {
-							bounds = hit.Bounds
-							break
-						}
-					}
-					found := false
-					for i, text := range s.Texts {
-						if text.Value != tc.text || text.Bounds.Y < bounds.Y || text.Bounds.Y >= bounds.Y+bounds.Height {
-							continue
-						}
-						found = true
-						if s.TextWidths[i] > text.Bounds.Width+0.5 || text.Bounds.X < bounds.X || text.Bounds.X+s.TextWidths[i] > bounds.X+bounds.Width+0.5 {
-							t.Errorf("%s text needs %.1fpx, text bounds %v, control %v", tc.control, s.TextWidths[i], text.Bounds, bounds)
-						}
-						if text.Bounds.X+s.TextWidths[i] > float32(width) {
-							t.Errorf("%s extends past window", tc.control)
-						}
-						if text.HasClip && (text.Bounds.X < text.ClipOf.X || text.Bounds.X+s.TextWidths[i] > text.ClipOf.X+text.ClipOf.Width+0.5) {
-							t.Errorf("%s text is clipped by %v", tc.control, text.ClipOf)
-						}
-					}
-					if !found {
-						t.Errorf("missing %s text %q", tc.control, tc.text)
-					}
-				}
-			})
-		}
+			}
+		})
 	}
 }
 
 func TestLogColumnsAlignAtWindowWidths(t *testing.T) {
-	g := testutil.NewRepo(t)
-	g.WriteFile("base.txt", "base\n")
-	subject := strings.TrimSpace(strings.Repeat("A long commit subject must leave room for metadata ", 8))
-	g.Commit(subject)
-	g.Git("commit", "--amend", "--no-edit", "--date=2001-02-03T12:00:00Z")
-	m, d := openDriver(t, g.Dir)
-	waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading && len(m.log.Details) > 0 })
-	for _, showHash := range []bool{false, true} {
-		m.log.ShowHash = showHash
-		for _, width := range []int{1200, 1400, 1600, 1400, 1200} {
-			t.Run(fmt.Sprintf("%d/hash=%v", width, showHash), func(t *testing.T) {
-				if err := d.Resize(width, 900); err != nil {
-					t.Fatal(err)
-				}
-				snapshot := d.Snapshot()
-				var row gfx.Rect
-				for _, hit := range snapshot.Hits {
-					if hit.Label == subject {
-						row = hit.Bounds
-						break
-					}
-				}
-				if row.Width == 0 {
-					t.Fatal("first log row is missing")
-				}
-				var list gfx.Rect
-				for _, hit := range snapshot.Hits {
-					if hit.Container && hit.Role == gfx.RoleListBox &&
-						row.X >= hit.Bounds.X && row.X < hit.Bounds.X+hit.Bounds.Width &&
-						row.Y >= hit.Bounds.Y && row.Y < hit.Bounds.Y+hit.Bounds.Height {
-						list = hit.Bounds
-						break
-					}
-				}
-				if list.Width == 0 {
-					t.Fatal("log list bounds are missing")
-				}
-				find := func(value string, inRow bool) viva.Label {
-					t.Helper()
-					for _, label := range snapshot.Labels {
-						inside := label.Bounds.Y >= row.Y && label.Bounds.Y < row.Y+row.Height
-						if label.Value == value && inside == inRow && (inRow || label.Bounds.Y < row.Y) {
-							return label
+	for _, language := range []string{"en", "zh-CN"} {
+		t.Run(language, func(t *testing.T) {
+			g := testutil.NewRepo(t)
+			g.WriteFile("base.txt", "base\n")
+			subject := strings.TrimSpace(strings.Repeat("A long commit subject must leave room for metadata ", 8))
+			g.Commit(subject)
+			g.Git("commit", "--amend", "--no-edit", "--date=2001-02-03T12:00:00Z")
+			m, d := openDriver(t, g.Dir)
+			m.SetLanguage(language)
+			waitFor(t, d, func() bool { return m.repo != nil && !m.log.Loading && len(m.log.Details) > 0 })
+			for _, showHash := range []bool{false, true} {
+				m.log.ShowHash = showHash
+				for _, width := range []int{1200, 1400, 1600, 1400, 1200} {
+					t.Run(fmt.Sprintf("%d/hash=%v", width, showHash), func(t *testing.T) {
+						if err := d.Resize(width, 900); err != nil {
+							t.Fatal(err)
 						}
-					}
-					t.Fatalf("missing painted text %q (in row: %v)", value, inRow)
-					return viva.Label{}
+						snapshot := d.Snapshot()
+						var row gfx.Rect
+						for _, hit := range snapshot.Hits {
+							if hit.Label == subject {
+								row = hit.Bounds
+								break
+							}
+						}
+						if row.Width == 0 {
+							t.Fatal("first log row is missing")
+						}
+						var list gfx.Rect
+						for _, hit := range snapshot.Hits {
+							if hit.Container && hit.Role == gfx.RoleListBox &&
+								row.X >= hit.Bounds.X && row.X < hit.Bounds.X+hit.Bounds.Width &&
+								row.Y >= hit.Bounds.Y && row.Y < hit.Bounds.Y+hit.Bounds.Height {
+								list = hit.Bounds
+								break
+							}
+						}
+						if list.Width == 0 {
+							t.Fatal("log list bounds are missing")
+						}
+						find := func(value string, inRow bool) viva.Label {
+							t.Helper()
+							for _, label := range snapshot.Labels {
+								inside := label.Bounds.Y >= row.Y && label.Bounds.Y < row.Y+row.Height
+								if label.Value == value && inside == inRow && (inRow || label.Bounds.Y < row.Y) {
+									return label
+								}
+							}
+							t.Fatalf("missing painted text %q (in row: %v)", value, inRow)
+							return viva.Label{}
+						}
+						columns := []struct{ heading, cell string }{
+							{m.Text().Author, m.log.Commits[0].Author.Name},
+							{m.Text().Date, m.Text().ShortDate(m.log.Commits[0].Author.When)},
+						}
+						if showHash {
+							columns = append(columns, struct{ heading, cell string }{m.Text().Hash, m.log.Commits[0].Hash.Short()})
+						}
+						for _, column := range columns {
+							header, cell := find(column.heading, false), find(column.cell, true)
+							if cell.Bounds.X < header.Bounds.X-0.5 || cell.Bounds.X+cell.Bounds.Width > header.Bounds.X+header.Bounds.Width+0.5 {
+								t.Errorf("%s cell %v falls outside header column %v", column.heading, cell.Bounds, header.Bounds)
+							}
+						}
+						ellipsis := false
+						for _, cell := range snapshot.Labels {
+							if cell.Bounds.Y < row.Y || cell.Bounds.Y >= row.Y+row.Height {
+								continue
+							}
+							// The changed-files tree now starts alongside the log. Its
+							// text belongs to a separate list and can share this row's Y.
+							if cell.Bounds.X >= list.X+list.Width && cell.Value == "base.txt" {
+								continue
+							}
+							if cell.Bounds.X < list.X-0.5 || cell.Bounds.X+cell.Bounds.Width > list.X+list.Width+0.5 {
+								t.Errorf("cell %q (%v) extends past log list %v", cell.Value, cell.Bounds, list)
+							}
+							ellipsis = ellipsis || strings.HasSuffix(cell.Value, "\u2026")
+						}
+						if !ellipsis {
+							t.Fatal("long subject must end with an ellipsis")
+						}
+					})
 				}
-				columns := []struct{ heading, cell string }{
-					{"Author", m.log.Commits[0].Author.Name},
-					{"Date", m.log.Commits[0].Author.When.Format("2/1/06, 3:04 pm")},
-				}
-				if showHash {
-					columns = append(columns, struct{ heading, cell string }{"Hash", m.log.Commits[0].Hash.Short()})
-				}
-				for _, column := range columns {
-					header, cell := find(column.heading, false), find(column.cell, true)
-					if cell.Bounds.X < header.Bounds.X-0.5 || cell.Bounds.X+cell.Bounds.Width > header.Bounds.X+header.Bounds.Width+0.5 {
-						t.Errorf("%s cell %v falls outside header column %v", column.heading, cell.Bounds, header.Bounds)
-					}
-				}
-				ellipsis := false
-				for _, cell := range snapshot.Labels {
-					if cell.Bounds.Y < row.Y || cell.Bounds.Y >= row.Y+row.Height {
-						continue
-					}
-					// The changed-files tree now starts alongside the log. Its
-					// text belongs to a separate list and can share this row's Y.
-					if cell.Bounds.X >= list.X+list.Width && cell.Value == "base.txt" {
-						continue
-					}
-					if cell.Bounds.X < list.X-0.5 || cell.Bounds.X+cell.Bounds.Width > list.X+list.Width+0.5 {
-						t.Errorf("cell %q (%v) extends past log list %v", cell.Value, cell.Bounds, list)
-					}
-					ellipsis = ellipsis || strings.HasSuffix(cell.Value, "\u2026")
-				}
-				if !ellipsis {
-					t.Fatal("long subject must end with an ellipsis")
-				}
-			})
-		}
+			}
+		})
 	}
 }
 

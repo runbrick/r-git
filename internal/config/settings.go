@@ -26,6 +26,8 @@ const (
 
 // AppSettings is application-wide state. It is stored once, not per repo.
 type AppSettings struct {
+	// Language selects UI messages; older settings migrate to Simplified Chinese.
+	Language string `json:"language"`
 	// Theme selects the application appearance independently of the OS.
 	Theme string `json:"theme"`
 	// ShowLogInEditor keeps the log as the main view. Java default true:
@@ -102,6 +104,7 @@ type RecentProject struct {
 // DefaultAppSettings returns Java defaults for a new installation.
 func DefaultAppSettings() AppSettings {
 	return AppSettings{
+		Language:          "zh-CN",
 		Theme:             "dark",
 		ShowLogInEditor:   true,
 		MaxRecentProjects: 50,
@@ -122,6 +125,9 @@ func DefaultRepoSettings() RepoSettings {
 // Normalize fills zero-value fields that JSON would otherwise leave blank
 // when an older writer omitted them. Callers that Load get this applied.
 func (s AppSettings) normalized() AppSettings {
+	if s.Language != "en" && s.Language != "zh-CN" {
+		s.Language = "zh-CN"
+	}
 	if s.Theme != "light" && s.Theme != "dark" {
 		s.Theme = "dark"
 	}
@@ -249,6 +255,7 @@ func samePath(a, b string) bool {
 }
 
 type appV0 struct {
+	Language          string          `json:"language"`
 	Theme             string          `json:"theme"`
 	ShowLogInEditor   *bool           `json:"showLogInEditor"`
 	MaxRecentProjects *int            `json:"maxRecentProjects"`
@@ -262,6 +269,9 @@ func migrateAppV0(raw json.RawMessage) (AppSettings, error) {
 		return AppSettings{}, fmt.Errorf("%w: %s", ErrInvalidSettings, err)
 	}
 	settings := DefaultAppSettings()
+	if old.Language == "en" || old.Language == "zh-CN" {
+		settings.Language = old.Language
+	}
 	if old.Theme == "light" || old.Theme == "dark" {
 		settings.Theme = old.Theme
 	}

@@ -1,6 +1,7 @@
 package branches
 
 import (
+	"github.com/runbrick/r-git/internal/i18n"
 	"strings"
 
 	"github.com/runbrick/r-git/internal/git/model"
@@ -29,6 +30,10 @@ type StashRequest struct {
 
 // StashPanel lists stash entries and creates new ones.
 type StashPanel struct {
+	dropText i18n.NameText
+	popText  i18n.NameText
+
+	i18n.Locale
 	Open             bool
 	Entries          []model.Stash
 	Selected         int
@@ -60,10 +65,10 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 		p.ready = StashRequest{}
 		return ready
 	}
-	ui.Modal(c, &p.Open, "Stashes", func() {
+	ui.ModalWith(c, &p.Open, p.Text().Stashes, ui.ModalSpec{NoClose: p.Text() != &i18n.En}, func() {
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
 			if len(p.Entries) == 0 {
-				ui.Text(c, "No stashes.").Muted()
+				ui.Text(c, p.Text().NoStashes).Muted()
 			}
 			for i, entry := range p.Entries {
 				item := entry
@@ -79,8 +84,8 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 					}
 				})
 			}
-			ui.Text(c, "Create stash").FontSize(12).Muted()
-			field := ui.TextField(c, &p.Message, "Message", "WIP")
+			ui.Text(c, p.Text().CreateStash).FontSize(12).Muted()
+			field := ui.TextField(c, &p.Message, p.Text().Message, "WIP")
 			if field.Submitted() {
 				pending = StashRequest{
 					Action: StashCreate,
@@ -91,17 +96,17 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 					},
 				}
 			}
-			ui.Checkbox(c, &p.IncludeUntracked, "Include untracked")
-			ui.Checkbox(c, &p.KeepIndex, "Keep index")
+			ui.Checkbox(c, &p.IncludeUntracked, p.Text().IncludeUntracked)
+			ui.Checkbox(c, &p.KeepIndex, p.Text().KeepIndex)
 			if p.Error != "" {
 				ui.Text(c, p.Error).Color(c.Theme().Danger).FontSize(12)
 			}
 		})
 	}, func() {
-		if ui.Button(c, "Close stash").Outline().Clicked() {
+		if ui.Button(c, p.Text().CloseStash).Outline().Clicked() {
 			p.Open = false
 		}
-		if ui.Button(c, "Save stash").Clicked() {
+		if ui.Button(c, p.Text().SaveStash).Clicked() {
 			pending = StashRequest{Action: StashCreate, Options: ops.StashSaveOptions{
 				Message: strings.TrimSpace(p.Message), IncludeUntracked: p.IncludeUntracked, KeepIndex: p.KeepIndex,
 			}}
@@ -113,13 +118,13 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 			return
 		}
 		ref := p.Entries[p.Selected].Ref
-		if ui.Button(c, "Apply").Clicked() {
+		if ui.Button(c, p.Text().Apply).Clicked() {
 			pending = StashRequest{Action: StashApply, Ref: ref}
 		}
-		if ui.Button(c, "Pop").Clicked() {
+		if ui.Button(c, p.Text().Pop).Clicked() {
 			p.confirmPop = true
 		}
-		if ui.Button(c, "Drop").Clicked() {
+		if ui.Button(c, p.Text().Drop).Clicked() {
 			p.confirmDrop = true
 		}
 	})
@@ -133,13 +138,13 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 func (p *StashPanel) confirm(c ui.C, pending *StashRequest) {
 	if p.confirmDrop {
 		ref := p.selectedRef()
-		ui.Modal(c, &p.confirmDrop, "Drop stash", func() {
-			ui.Text(c, "Drop "+ref+"? This cannot be undone.")
+		ui.ModalWith(c, &p.confirmDrop, p.Text().DropStash, ui.ModalSpec{NoClose: p.Text() != &i18n.En}, func() {
+			ui.Text(c, p.dropText.Get(p.Text(), ref, p.Text().DropStashPrompt))
 		}, func() {
-			if ui.Button(c, "Cancel").Outline().Clicked() {
+			if ui.Button(c, p.Text().Cancel).Outline().Clicked() {
 				p.confirmDrop = false
 			}
-			if ui.Button(c, "Drop").Clicked() {
+			if ui.Button(c, p.Text().Drop).Clicked() {
 				p.confirmDrop = false
 				*pending = StashRequest{Action: StashDrop, Ref: ref}
 			}
@@ -147,13 +152,13 @@ func (p *StashPanel) confirm(c ui.C, pending *StashRequest) {
 	}
 	if p.confirmPop {
 		ref := p.selectedRef()
-		ui.Modal(c, &p.confirmPop, "Pop stash", func() {
-			ui.Text(c, "Pop "+ref+"? The stash is removed if the apply succeeds.")
+		ui.ModalWith(c, &p.confirmPop, p.Text().PopStash, ui.ModalSpec{NoClose: p.Text() != &i18n.En}, func() {
+			ui.Text(c, p.popText.Get(p.Text(), ref, p.Text().PopStashPrompt))
 		}, func() {
-			if ui.Button(c, "Cancel").Outline().Clicked() {
+			if ui.Button(c, p.Text().Cancel).Outline().Clicked() {
 				p.confirmPop = false
 			}
-			if ui.Button(c, "Pop now").Clicked() {
+			if ui.Button(c, p.Text().PopNow).Clicked() {
 				p.confirmPop = false
 				*pending = StashRequest{Action: StashPop, Ref: ref}
 			}
@@ -208,6 +213,7 @@ type RemoteChange struct {
 
 // RemotesDialog adds, removes, renames, and edits remote URLs.
 type RemotesDialog struct {
+	i18n.Locale
 	Open     bool
 	Remotes  []RemoteEdit
 	NewName  string
@@ -236,29 +242,29 @@ func (d *RemotesDialog) Page(c ui.C) {
 	if !d.Open {
 		return
 	}
-	ui.Modal(c, &d.Open, "Remotes", func() {
+	ui.ModalWith(c, &d.Open, d.Text().Remotes, ui.ModalSpec{NoClose: d.Text() != &i18n.En}, func() {
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
 			for i := range d.Remotes {
 				remote := &d.Remotes[i]
 				ui.Column(c.Key(remote.Name)).Gap(4).FillWidth().Children(func() {
 					ui.Text(c, remote.Name).Bold()
-					ui.TextField(c, &remote.NewName, "Name", remote.Name)
-					ui.TextField(c, &remote.URL, "URL", "")
-					ui.Checkbox(c, &remote.Remove, "Remove")
+					ui.TextField(c, &remote.NewName, d.Text().Name, remote.Name)
+					ui.TextField(c, &remote.URL, d.Text().URL, "")
+					ui.Checkbox(c, &remote.Remove, d.Text().Remove)
 				})
 			}
-			ui.Text(c, "Add remote").FontSize(12).Muted()
-			ui.TextField(c, &d.NewName, "New remote name", "origin")
-			ui.TextField(c, &d.NewURL, "New remote URL", "https://example.com/repo.git")
+			ui.Text(c, d.Text().AddRemote).FontSize(12).Muted()
+			ui.TextField(c, &d.NewName, d.Text().NewRemoteName, "origin")
+			ui.TextField(c, &d.NewURL, d.Text().NewRemoteURL, "https://example.com/repo.git")
 			if d.Error != "" {
 				ui.Text(c, d.Error).Color(c.Theme().Danger).FontSize(12)
 			}
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, d.Text().Cancel).Outline().Clicked() {
 			d.Open = false
 		}
-		if ui.Button(c, "Save").Clicked() {
+		if ui.Button(c, d.Text().Save).Clicked() {
 			changes, errText := d.collect()
 			if errText != "" {
 				d.Error = errText
@@ -275,7 +281,7 @@ func (d *RemotesDialog) collect() ([]RemoteChange, string) {
 	var changes []RemoteChange
 	if name := strings.TrimSpace(d.NewName); name != "" || strings.TrimSpace(d.NewURL) != "" {
 		if name == "" || strings.TrimSpace(d.NewURL) == "" {
-			return nil, "A new remote needs a name and a URL."
+			return nil, d.Text().ANewRemoteNeedsANameAndAURL
 		}
 		changes = append(changes, RemoteChange{Add: true, Name: name, URL: strings.TrimSpace(d.NewURL)})
 	}
@@ -286,7 +292,7 @@ func (d *RemotesDialog) collect() ([]RemoteChange, string) {
 		}
 		newName := strings.TrimSpace(remote.NewName)
 		if newName == "" {
-			return nil, "Remote name cannot be empty."
+			return nil, d.Text().RemoteNameCannotBeEmpty
 		}
 		if newName != remote.Name {
 			changes = append(changes, RemoteChange{Rename: true, Old: remote.Name, Name: newName, URL: strings.TrimSpace(remote.URL)})

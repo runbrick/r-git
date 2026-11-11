@@ -3,6 +3,7 @@ package branches
 
 import (
 	"fmt"
+	"github.com/runbrick/r-git/internal/i18n"
 	"strings"
 
 	"github.com/runbrick/r-git/internal/git/model"
@@ -24,14 +25,15 @@ const (
 
 // Node is one flattened tree row. Groups are branches; leaves are refs.
 type Node struct {
-	Kind     NodeKind
-	Label    string
-	Depth    int
-	Expanded bool
-	Current  bool
-	Favorite bool
-	Ahead    int
-	Behind   int
+	text, badge string
+	Kind        NodeKind
+	Label       string
+	Depth       int
+	Expanded    bool
+	Current     bool
+	Favorite    bool
+	Ahead       int
+	Behind      int
 	// Ref is the short name for a branch or tag. Group rows leave it empty.
 	Ref string
 	// Remote is the remote name for a remote-tracking branch.
@@ -75,6 +77,7 @@ type Request struct {
 // expands groups, and reports actions. Git runs in the shell, which owns
 // cancellation.
 type Panel struct {
+	i18n.Locale
 	Nodes    []Node
 	Filter   string
 	Selected int
@@ -101,7 +104,7 @@ func (p *Panel) Load(snap repo.Snapshot, aheadBehind map[string][2]int, favorite
 		p.expanded = map[string]bool{"local": true}
 	}
 	var nodes []Node
-	nodes = append(nodes, Node{Kind: KindGroup, Label: "Local", Group: "local", Depth: 0, Expanded: p.expanded["local"]})
+	nodes = append(nodes, Node{Kind: KindGroup, Label: p.Text().Local, Group: "local", Depth: 0, Expanded: p.expanded["local"]})
 	current := snap.CurrentBranch.Name()
 	for _, ref := range snap.Branches {
 		if ref.Ref.Kind() != model.KindLocalBranch {
@@ -141,11 +144,12 @@ func (p *Panel) Load(snap repo.Snapshot, aheadBehind map[string][2]int, favorite
 			})
 		}
 	}
-	nodes = append(nodes, Node{Kind: KindGroup, Label: "Tags", Group: "tags", Depth: 0, Expanded: p.expanded["tags"]})
+	nodes = append(nodes, Node{Kind: KindGroup, Label: p.Text().Tags, Group: "tags", Depth: 0, Expanded: p.expanded["tags"]})
 	for _, tag := range snap.Tags {
 		nodes = append(nodes, Node{Kind: KindTag, Label: tag.Ref.Name(), Ref: tag.Ref.Name(), Group: "tags", Depth: 1})
 	}
 	p.Nodes = nodes
+	p.cacheLabels()
 	if p.Selected >= len(nodes) {
 		p.Selected = 0
 	}
@@ -160,37 +164,37 @@ func (p *Panel) Page(c ui.C) Request {
 	p.tree.Key = p.key
 	var req Request
 	ui.Column(c).Fill().Gap(8).Pad(8).Children(func() {
-		ui.Text(c, "Branches").Bold()
-		ui.TextField(c, &p.Filter, "Find branch", "Type to filter")
+		ui.Text(c, p.Text().Branches).Bold()
+		ui.TextField(c, &p.Filter, p.Text().FindBranch, p.Text().TypeToFilter)
 		ui.Row(c).FillWidth().Gap(4).Children(func() {
-			if controls.IconButton(c, icons.Pair(c, icons.Fetch, icons.Fetch_dark), "Fetch remote").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Fetch, icons.Fetch_dark), p.Text().FetchRemote).Clicked() {
 				req.Action = ActionFetch
 			}
-			if controls.IconButton(c, icons.Pair(c, icons.Pull, icons.Pull_dark), "Pull changes").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Pull, icons.Pull_dark), p.Text().PullChanges).Clicked() {
 				req.Action = ActionPull
 			}
-			if controls.IconButton(c, icons.Pair(c, icons.Push, icons.Push_dark), "Push branches").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Push, icons.Push_dark), p.Text().PushBranches).Clicked() {
 				req.Action = ActionPush
 			}
 		})
 		ui.Row(c).FillWidth().Gap(4).Children(func() {
-			if controls.IconButton(c, icons.Pair(c, icons.Stash, icons.Stash_dark), "Stash").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Stash, icons.Stash_dark), p.Text().Stash).Clicked() {
 				req.Action = ActionStash
 			}
-			if controls.IconButton(c, icons.Pair(c, icons.Remotes, icons.Remotes_dark), "Remotes").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Remotes, icons.Remotes_dark), p.Text().Remotes).Clicked() {
 				req.Action = ActionRemotes
 			}
 		})
 		if p.Error != "" {
 			ui.Text(c, p.Error).Color(c.Theme().Danger).FontSize(12)
 		}
-		tree := ui.Column(c).Grow(1).Hit(ui.ID(c), "Branches tree").Children(func() {
+		tree := ui.Column(c).Grow(1).Hit(ui.ID(c), p.Text().BranchesTree).Children(func() {
 			ui.Tree(c, &p.tree, len(p.visible), p.label, p.row).Grow(1)
 		})
 		ui.ContextMenu(c, tree, func(menu *ui.MenuItems) {
 			req = p.menu(menu, req)
 		})
-		anchor := controls.IconButton(c, icons.Pair(c, icons.More, icons.More_dark), "Branch actions")
+		anchor := controls.IconButton(c, icons.Pair(c, icons.More, icons.More_dark), p.Text().BranchActions)
 		if anchor.Clicked() {
 			p.actions = !p.actions
 		}
@@ -216,34 +220,34 @@ func (p *Panel) menu(menu *ui.MenuItems, req Request) Request {
 	if !ok || node.Kind == KindGroup {
 		return req
 	}
-	if node.Kind == KindBranch && !node.Current && menu.Item("Checkout").Clicked() {
+	if node.Kind == KindBranch && !node.Current && menu.Item(p.Text().Checkout).Clicked() {
 		return Request{Action: ActionCheckout, Ref: node.Ref, Remote: node.Remote, Kind: node.Kind}
 	}
-	if node.Kind == KindBranch && menu.Item("New branch from").Clicked() {
+	if node.Kind == KindBranch && menu.Item(p.Text().NewBranchFrom).Clicked() {
 		return Request{Action: ActionNewBranch, Ref: node.Ref, Remote: node.Remote, Kind: node.Kind}
 	}
-	if node.Kind == KindBranch && node.Remote == "" && menu.Item("Rename").Clicked() {
+	if node.Kind == KindBranch && node.Remote == "" && menu.Item(p.Text().Rename).Clicked() {
 		return Request{Action: ActionRename, Ref: node.Ref, Kind: node.Kind}
 	}
-	if !node.Current && menu.Item("Delete").Clicked() {
+	if !node.Current && menu.Item(p.Text().Delete).Clicked() {
 		return Request{Action: ActionDelete, Ref: node.Ref, Remote: node.Remote, Kind: node.Kind}
 	}
-	if node.Kind == KindBranch && !node.Current && menu.Item("Merge into current").Clicked() {
+	if node.Kind == KindBranch && !node.Current && menu.Item(p.Text().MergeIntoCurrent).Clicked() {
 		return Request{Action: ActionMerge, Ref: node.Ref, Kind: node.Kind}
 	}
-	if node.Kind == KindBranch && !node.Current && menu.Item("Rebase current onto").Clicked() {
+	if node.Kind == KindBranch && !node.Current && menu.Item(p.Text().RebaseCurrentOnto).Clicked() {
 		return Request{Action: ActionRebase, Ref: node.Ref, Kind: node.Kind}
 	}
-	if menu.Item("Compare").Clicked() {
+	if menu.Item(p.Text().Compare).Clicked() {
 		return Request{Action: ActionCompare, Ref: node.Ref, Kind: node.Kind}
 	}
-	if node.Kind == KindBranch && node.Remote != "" && menu.Item("Checkout and rebase").Clicked() {
+	if node.Kind == KindBranch && node.Remote != "" && menu.Item(p.Text().CheckoutAndRebase).Clicked() {
 		return Request{Action: ActionCheckoutRebase, Ref: node.Ref, Remote: node.Remote, Kind: node.Kind}
 	}
 	if node.Kind == KindBranch && node.Remote == "" {
-		label := "Favorite"
+		label := p.Text().Favorite
 		if node.Favorite {
-			label = "Unfavorite"
+			label = p.Text().Unfavorite
 		}
 		if menu.Item(label).Clicked() {
 			return Request{Action: ActionFavorite, Ref: node.Ref, Kind: node.Kind}
@@ -308,22 +312,16 @@ func (p *Panel) node(i int) ui.TreeNode {
 func (p *Panel) key(i int) int { return p.visible[i] }
 
 func (p *Panel) label(i int) string {
-	node := p.Nodes[p.visible[i]]
-	if node.Current {
-		return node.Label + " (current)"
-	}
-	return node.Label
+	return p.Nodes[p.visible[i]].text
 }
 
 func (p *Panel) row(i int) {
 	c := p.page
 	node := p.Nodes[p.visible[i]]
 	text := p.label(i)
-	if node.Favorite {
-		text += " ★"
-	}
+
 	ui.Text(c, text)
-	if badge := BadgeText(node.Ahead, node.Behind); badge != "" {
+	if badge := node.badge; badge != "" {
 		ui.Text(c, badge).FontSize(12).Muted()
 	}
 }
@@ -381,4 +379,18 @@ func RejectedNonFF(results []ops.PushNativeResult) bool {
 		}
 	}
 	return false
+}
+
+func (p *Panel) cacheLabels() {
+	for i := range p.Nodes {
+		n := &p.Nodes[i]
+		n.text = n.Label
+		if n.Current {
+			n.text = p.Text().CurrentBranch(n.Label)
+		}
+		if n.Favorite {
+			n.text += " ★"
+		}
+		n.badge = BadgeText(n.Ahead, n.Behind)
+	}
 }

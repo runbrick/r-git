@@ -2,6 +2,7 @@ package log
 
 import (
 	"fmt"
+	"github.com/runbrick/r-git/internal/i18n"
 	"path"
 	"regexp"
 	"sort"
@@ -20,6 +21,10 @@ import (
 
 // View owns the virtualized history table, filters, graph and selection.
 type View struct {
+	commitsText, filesText                 i18n.NumberText
+	authorText, committerText, parentsText i18n.NameText
+	authoredText, committedText            string
+	i18n.Locale
 	Commits          []model.Commit
 	Graph            *GraphRows
 	GraphIndex       map[model.Hash]int
@@ -57,6 +62,7 @@ type View struct {
 	fileC            ui.C
 	detailSource     []model.FileChange
 	parentLabel      string
+	containing       []string
 
 	list             ui.ListState
 	columns          commitColumns
@@ -114,7 +120,7 @@ func (v *View) SetGraph(graphRows *GraphRows, indexes map[model.Hash]int) {
 // AppendPage adds one metadata page and refreshes the filter index.
 func (v *View) AppendPage(commits []model.Commit, done bool) {
 	for i := range commits {
-		v.dates = append(v.dates, shortDate(commits[i].Author.When))
+		v.dates = append(v.dates, v.Text().ShortDate(commits[i].Author.When))
 		v.searchText = append(v.searchText, strings.ToLower(commits[i].Subject+" "+commits[i].Hash.String()))
 	}
 	v.Commits = append(v.Commits, commits...)
@@ -126,7 +132,7 @@ func (v *View) AppendPage(commits []model.Commit, done bool) {
 func (v *View) SetError(err error) {
 	v.Loading = false
 	if err != nil {
-		v.Error = err.Error()
+		v.Error = v.Text().Error(err)
 	}
 }
 
@@ -187,7 +193,7 @@ func (v *View) rebuildVisible() {
 		var err error
 		pattern, err = regexp.Compile(query)
 		if err != nil {
-			v.FilterError = "Invalid regular expression"
+			v.FilterError = v.Text().InvalidRegularExpression
 		}
 	}
 	needle := v.normalizedFilter
@@ -243,7 +249,7 @@ func (v *View) toolbar(c ui.C) {
 	t := c.Theme()
 	ui.Row(c).FillWidth().PadX(8).PadY(4).Gap(4).Items(ui.Center).Children(func() {
 		oldFilter, oldBranch, oldUser, oldDate := v.Filter, v.Branch, v.User, v.Date
-		ui.TextField(c, &v.Filter, "Filter", "Text or hash").Width(172).MinWidth(100).Grow(1)
+		ui.TextField(c, &v.Filter, v.Text().Filter, v.Text().TextOrHash).Width(172).MinWidth(100).Grow(1)
 		toggle := func(label, text string, on *bool) {
 			button := controls.TextButton(c, label, text).Width(40).Shrink(0).Tooltip(label)
 			if *on {
@@ -254,14 +260,14 @@ func (v *View) toolbar(c ui.C) {
 				v.rebuildVisible()
 			}
 		}
-		toggle("Regex", ".*", &v.Regex)
-		toggle("Match case", "Cc", &v.MatchCase)
-		ui.Select(c, &v.Branch, v.Choices, nil).Label("Branch").Width(128).Shrink(0)
-		user := ui.ButtonBase(c, "User").Width(80).Height(28).Shrink(0).PadX(8).
-			Radius(t.Metrics.RadiusControl).Border(1, t.Input).Tooltip("Filter by author").
+		toggle(v.Text().Regex, ".*", &v.Regex)
+		toggle(v.Text().MatchCase, "Cc", &v.MatchCase)
+		ui.Select(c, &v.Branch, v.Choices, v.Text().BranchChoice).Label(v.Text().BranchFilter).Width(128).Shrink(0)
+		user := ui.ButtonBase(c, v.Text().User).Width(80).Height(28).Shrink(0).PadX(8).
+			Radius(t.Metrics.RadiusControl).Border(1, t.Input).Tooltip(v.Text().FilterByAuthor).
 			Hover(ui.Look{}.Background(t.Hover)).Pressed(ui.Look{}.Background(t.Muted)).Focus(ui.Look{}.Ring(2, t.Ring)).
 			Children(func() {
-				ui.Text(c, "User").FontSize(13).Grow(1)
+				ui.Text(c, v.Text().User).FontSize(13).Grow(1)
 				ui.Icon(c, icons.Pair(c, icons.Down, icons.Down_dark)).Size(16, 16)
 			})
 		if v.User != "" {
@@ -270,27 +276,27 @@ func (v *View) toolbar(c ui.C) {
 		if user.Clicked() {
 			v.userOpen = !v.userOpen
 		}
-		ui.Popover(c, user, &v.userOpen, func() { ui.TextField(c, &v.User, "User filter", "Author contains").Width(200) })
-		ui.Select(c, &v.Date, dateFilters, nil).Label("Date").Width(128).Shrink(0)
+		ui.Popover(c, user, &v.userOpen, func() { ui.TextField(c, &v.User, v.Text().UserFilter, v.Text().AuthorContains).Width(200) })
+		ui.Select(c, &v.Date, dateFilters, v.Text().DateChoice).Label(v.Text().Date).Width(128).Shrink(0)
 		if v.Toolbar != nil {
 			v.Toolbar(c)
 		}
-		if controls.IconButton(c, icons.Pair(c, icons.Refresh, icons.Refresh_dark), "Refresh log").Disabled(v.OnRefresh == nil).Clicked() {
+		if controls.IconButton(c, icons.Pair(c, icons.Refresh, icons.Refresh_dark), v.Text().RefreshLog).Disabled(v.OnRefresh == nil).Clicked() {
 			c.After(v.OnRefresh)
 		}
-		details := controls.IconButton(c, icons.Pair(c, icons.Show, icons.Show_dark), "Show details")
+		details := controls.IconButton(c, icons.Pair(c, icons.Show, icons.Show_dark), v.Text().ShowDetails)
 		if !v.HideDetails {
 			details.Background(t.Hover)
 		}
 		if details.Clicked() {
 			v.HideDetails = !v.HideDetails
 		}
-		options := controls.IconButton(c, icons.Pair(c, icons.More, icons.More_dark), "Log options")
+		options := controls.IconButton(c, icons.Pair(c, icons.More, icons.More_dark), v.Text().LogOptions)
 		if options.Clicked() {
 			v.optionsOpen = !v.optionsOpen
 		}
 		ui.Menu(c, options, &v.optionsOpen, func(menu *ui.MenuItems) {
-			if menu.Item("Show hash").Checked(v.ShowHash).Clicked() {
+			if menu.Item(v.Text().ShowHash).Checked(v.ShowHash).Clicked() {
 				v.ShowHash = !v.ShowHash
 			}
 		})
@@ -322,11 +328,11 @@ func (v *View) Page(c ui.C) {
 				}
 				ui.CustomLayout(c, &v.columns).FillWidth().PadX(12).PadY(4).Background(theme.Card).Children(func() {
 					ui.Slot(c)
-					ui.Text(c, "Subject").FontSize(11).Muted().Ellipsis()
-					ui.Text(c, "Author").FontSize(11).Muted().Ellipsis()
-					ui.Text(c, "Date").FontSize(11).Muted().Ellipsis()
+					ui.Text(c, v.Text().Subject).FontSize(11).Muted().Ellipsis()
+					ui.Text(c, v.Text().Author).FontSize(11).Muted().Ellipsis()
+					ui.Text(c, v.Text().Date).FontSize(11).Muted().Ellipsis()
 					if v.ShowHash {
-						ui.Text(c, "Hash").FontSize(11).Muted().Ellipsis()
+						ui.Text(c, v.Text().Hash).FontSize(11).Muted().Ellipsis()
 					}
 				})
 				ui.List(c, &v.list, len(v.visible), func(row ui.ListRow) {
@@ -392,9 +398,9 @@ func (v *View) Page(c ui.C) {
 					v.OnPage(branch, skip)
 				}
 				ui.Row(c).FillWidth().PadX(12).PadY(4).Gap(8).Items(ui.Center).Children(func() {
-					ui.Text(c, fmt.Sprintf("%d commits", len(v.Commits))).FontSize(11).Muted()
+					ui.Text(c, v.commitsText.Get(v.Text(), len(v.Commits), v.Text().CommitsCount)).FontSize(11).Muted()
 					if v.Loading {
-						ui.Text(c, "Loading...").FontSize(11).Muted()
+						ui.Text(c, v.Text().LoadingEllipsis).FontSize(11).Muted()
 					}
 					if v.Error != "" {
 						ui.Text(c, v.Error).FontSize(12).Color(theme.Danger)
@@ -462,13 +468,13 @@ func (v *View) appendFiles(files []model.FileChange, prefix string, depth int) {
 		if !known {
 			expanded = true
 		}
-		v.fileNodes = append(v.fileNodes, fileNode{name: dir, path: full, label: dir, depth: depth, countLabel: fileCount(len(groups[dir])), folder: true, expanded: expanded})
+		v.fileNodes = append(v.fileNodes, fileNode{name: dir, path: full, label: dir, depth: depth, countLabel: v.Text().FilesCount(len(groups[dir])), folder: true, expanded: expanded})
 		if expanded {
 			v.appendFiles(groups[dir], full, depth+1)
 		}
 	}
 	for _, file := range leaves {
-		label := file.Status.String() + "  " + file.Path
+		label := v.Text().FileStatus(file.Status.String()) + "  " + file.Path
 		if file.OrigPath != "" {
 			label += "  <- " + file.OrigPath
 		}
@@ -505,6 +511,8 @@ func (v *View) cacheParents() {
 	v.branchLine = ""
 
 	if commit, ok := v.selectedCommit(); ok {
+		v.authoredText = v.Text().AuthoredOn(v.Text().ShortDate(commit.Author.When))
+		v.committedText = v.Text().CommittedOn(v.Text().ShortDate(commit.Committer.When))
 		for i, parent := range commit.Parents {
 			if i > 0 {
 				v.parentLabel += "  "
@@ -527,8 +535,8 @@ func (v *View) detailPane(c ui.C) {
 	v.fileC = c
 	ui.Column(c).Width(300).FillHeight().Background(theme.Background).Children(func() {
 		ui.Row(c).FillWidth().Height(32).PadX(12).Gap(8).Items(ui.Center).Children(func() {
-			ui.Text(c, "Changed files").FontSize(12).Muted()
-			ui.Text(c, fileCount(len(v.Details))).FontSize(12).Muted()
+			ui.Text(c, v.Text().ChangedFiles).FontSize(12).Muted()
+			ui.Text(c, v.filesText.Get(v.Text(), len(v.Details), v.Text().FilesCount)).FontSize(12).Muted()
 		})
 		ui.Tree(c, &v.files, len(v.fileNodes), v.fileLabel, v.fileContent).Grow(1)
 		if i, ok := v.files.Toggled(); ok && i < len(v.fileNodes) {
@@ -544,7 +552,7 @@ func (v *View) detailPane(c ui.C) {
 		ui.Scroll(c).FillWidth().Height(244).Pad(12).Gap(4).Children(func() {
 			commit, ok := v.selectedCommit()
 			if !ok {
-				ui.Text(c, "Select a commit").Muted()
+				ui.Text(c, v.Text().SelectACommit).Muted()
 				return
 			}
 			ui.Text(c, commit.Subject).FontSize(13).Bold()
@@ -552,14 +560,14 @@ func (v *View) detailPane(c ui.C) {
 				ui.Text(c, body).FontSize(12)
 			}
 			ui.Text(c, commit.Hash.Short()).FontSize(12).Mono()
-			ui.Text(c, "Author: "+commit.Author.Name).FontSize(12)
+			ui.Text(c, v.authorText.Get(v.Text(), commit.Author.Name, v.Text().AuthorName)).FontSize(12)
 			ui.Text(c, "<"+commit.Author.Email+">").FontSize(12).Color(theme.Primary)
-			ui.Text(c, "authored on "+shortDate(commit.Author.When)).FontSize(12).Muted()
-			ui.Text(c, "Committer: "+commit.Committer.Name).FontSize(12)
-			ui.Text(c, "committed on "+shortDate(commit.Committer.When)).FontSize(12).Muted()
+			ui.Text(c, v.authoredText).FontSize(12).Muted()
+			ui.Text(c, v.committerText.Get(v.Text(), commit.Committer.Name, v.Text().CommitterName)).FontSize(12)
+			ui.Text(c, v.committedText).FontSize(12).Muted()
 			ui.Text(c, v.branchLine).FontSize(12)
 			if v.parentLabel != "" {
-				ui.Text(c, "Parents: "+v.parentLabel).FontSize(12).Mono().Muted()
+				ui.Text(c, v.parentsText.Get(v.Text(), v.parentLabel, v.Text().ParentCommits)).FontSize(12).Mono().Muted()
 			}
 		})
 	})
@@ -656,5 +664,18 @@ func (v *View) selectedCommit() (model.Commit, bool) {
 // SetContaining installs branch containment from the repository, so branch
 // filters and metadata pagination do not change the branch membership count.
 func (v *View) SetContaining(names []string) {
-	v.branchLine = fmt.Sprintf("In %d branches: %s", len(names), strings.Join(names, ", "))
+	v.containing = names
+	v.branchLine = v.Text().InBranches(len(names), strings.Join(names, ", "))
+}
+
+// SetMessages invalidates date and tree text caches once on a language change.
+func (v *View) SetMessages(messages *i18n.Messages) {
+	v.UseMessages(messages)
+	for i, commit := range v.Commits {
+		v.dates[i] = messages.ShortDate(commit.Author.When)
+	}
+	v.rebuildFiles()
+	v.cacheParents()
+	v.SetContaining(v.containing)
+	v.rebuildVisible()
 }

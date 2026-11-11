@@ -3,7 +3,7 @@ package branches
 import (
 	"context"
 	"errors"
-	"fmt"
+	"github.com/runbrick/r-git/internal/i18n"
 	"strings"
 
 	"github.com/runbrick/r-git/internal/config"
@@ -21,6 +21,7 @@ import (
 // callbacks. Git runs on a worker the shell starts; results come back through
 // Apply, which the shell calls from OnWake.
 type Session struct {
+	i18n.Locale
 	Panel       Panel
 	Checkout    CheckoutDialog
 	NewBranch   NewBranchDialog
@@ -182,7 +183,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 		s.Checkout.Confirmed = false
 		name := s.pendingCheckout
 		start(func(ctx context.Context) {
-			_, err := ops.New(s.runner, s.repo.Path).CheckoutWithStash(ctx, name, "Checkout")
+			_, err := ops.New(s.runner, s.repo.Path).CheckoutWithStash(ctx, name, s.Text().Checkout)
 			s.finishCheckout(err, name)
 		})
 	}
@@ -191,7 +192,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 		name, startPoint := s.NewBranch.Name, s.NewBranch.StartPoint
 		start(func(ctx context.Context) {
 			_, err := ops.New(s.runner, s.repo.Path).CheckoutNew(ctx, name, startPoint)
-			s.finish(err, "Created "+name)
+			s.finish(err, s.Text().CreatedBranch(name))
 		})
 	}
 	if s.Rename.Confirmed {
@@ -199,7 +200,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 		old, name := s.Rename.Old, strings.TrimSpace(s.Rename.Name)
 		start(func(ctx context.Context) {
 			err := ops.New(s.runner, s.repo.Path).RenameBranch(ctx, old, name, false)
-			s.finish(err, "Renamed to "+name)
+			s.finish(err, s.Text().RenamedBranch(name))
 		})
 	}
 	if s.Delete.Confirmed {
@@ -225,7 +226,7 @@ func (s *Session) AfterPaint(start func(func(context.Context)), refresh func()) 
 			err := ops.New(s.runner, s.repo.Path).Pull(ctx, ops.PullParams{
 				Remote: remote, Branch: branch, Method: MethodOf(method, s.branchRebases()),
 			})
-			s.finish(err, "Pulled "+remote+"/"+branch)
+			s.finish(err, s.Text().PulledBranch(remote)+"/"+branch)
 		})
 	}
 	if s.stashReq.Action != StashNone {
@@ -248,13 +249,13 @@ func (s *Session) startCheckout(name string, stashed bool, start func(func(conte
 		branches := ops.New(s.runner, s.repo.Path)
 		var err error
 		if stashed {
-			_, err = branches.CheckoutWithStash(ctx, name, "Checkout")
+			_, err = branches.CheckoutWithStash(ctx, name, s.Text().Checkout)
 		} else {
 			_, err = branches.Checkout(ctx, name)
 		}
 		var overwritten *command.ErrLocalChangesWouldBeOverwritten
 		if errors.As(err, &overwritten) {
-			s.emit(UIEvent{CheckoutBranch: name, CheckoutFiles: overwritten.Files, Error: overwritten.Error()})
+			s.emit(UIEvent{CheckoutBranch: name, CheckoutFiles: overwritten.Files, Error: s.Text().Error(overwritten)})
 			return
 		}
 		s.finishCheckout(err, name)
@@ -266,14 +267,14 @@ func (s *Session) finishCheckout(err error, name string) {
 	if errors.As(err, &restore) {
 		// Refresh even on a conflicting restore: HEAD has switched and the
 		// unmerged index must be visible to the Conflicts screen.
-		s.emit(UIEvent{Error: err.Error(), Toast: "Local changes not fully restored", ToastBody: "The stash was kept. Open Conflicts to resolve the remaining changes, or Open stash to inspect the saved changes.", ToastKind: ui.ToastWarning, Refresh: true})
+		s.emit(UIEvent{Error: s.Text().Error(err), Toast: s.Text().LocalChangesNotFullyRestored, ToastBody: s.Text().TheStashWasKeptOpenConflictsToResolveTheRemainingChangesOrOpenStashToInspectTheSavedChanges, ToastKind: ui.ToastWarning, Refresh: true})
 		return
 	}
 	if err == nil {
-		s.emit(UIEvent{ClearError: true, Toast: "Checked out " + name, Refresh: true})
+		s.emit(UIEvent{ClearError: true, Toast: s.Text().CheckedOut(name), Refresh: true})
 		return
 	}
-	s.finish(err, "Checked out "+name)
+	s.finish(err, s.Text().CheckedOut(name))
 }
 
 func (s *Session) deleteBranch(ctx context.Context, name string, force bool, start func(func(context.Context)), refresh func()) {
@@ -283,14 +284,14 @@ func (s *Session) deleteBranch(ctx context.Context, name string, force bool, sta
 		s.emit(UIEvent{Unmerged: unmerged})
 		return
 	}
-	s.finish(err, "Deleted "+name)
+	s.finish(err, s.Text().DeletedBranch(name))
 }
 
 func (s *Session) preparePush(start func(func(context.Context))) {
 	start(func(ctx context.Context) {
 		targets, err := s.outgoing(ctx)
 		if err != nil {
-			s.emit(UIEvent{Error: err.Error()})
+			s.emit(UIEvent{Error: s.Text().Error(err)})
 			return
 		}
 		current := s.currentBranch()
@@ -340,7 +341,7 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 		remoteName, _ := s.upstream(target.Branch)
 		results, err := pusher.Push(ctx, target.Remote, refspec, force, remoteName == "")
 		if err != nil && len(results) == 0 {
-			s.emit(UIEvent{Error: err.Error()})
+			s.emit(UIEvent{Error: s.Text().Error(err)})
 			return
 		}
 		all = append(all, results...)
@@ -348,7 +349,7 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 	if tags {
 		results, err := pusher.Push(ctx, s.defaultRemote(), "--tags", false, false)
 		if err != nil && len(results) == 0 {
-			s.emit(UIEvent{Error: err.Error()})
+			s.emit(UIEvent{Error: s.Text().Error(err)})
 			return
 		}
 		all = append(all, results...)
@@ -357,7 +358,7 @@ func (s *Session) push(ctx context.Context, targets []PushTarget, force, tags bo
 		s.emit(UIEvent{ShowRejected: true, PushResults: all})
 		return
 	}
-	s.emit(UIEvent{Toast: "Pushed", ToastBody: fmt.Sprintf("%d refs", len(all)), Refresh: true})
+	s.emit(UIEvent{Toast: s.Text().Pushed, ToastBody: s.Text().RefsCount(len(all)), Refresh: true})
 }
 
 func (s *Session) pullThenPush(ctx context.Context, refresh func()) {
@@ -380,16 +381,16 @@ func (s *Session) pullThenPush(ctx context.Context, refresh func()) {
 }
 
 func (s *Session) startFetch(start func(func(context.Context)), refresh func()) {
-	s.fetchToast = s.Toaster.Show("Fetching", s.defaultRemote(), ui.ToastLoading)
+	s.fetchToast = s.Toaster.Show(s.Text().Fetching, s.defaultRemote(), ui.ToastLoading)
 	id := s.fetchToast
 	remote := s.defaultRemote()
 	start(func(ctx context.Context) {
 		err := ops.New(s.runner, s.repo.Path).Fetch(ctx, ops.FetchParams{Remotes: []string{remote}})
 		if err != nil {
-			s.emit(UIEvent{LoadingID: id, DoneTitle: "Fetch failed", DoneBody: err.Error(), DoneKind: ui.ToastError, Error: err.Error()})
+			s.emit(UIEvent{LoadingID: id, DoneTitle: s.Text().FetchFailed, DoneBody: s.Text().Error(err), DoneKind: ui.ToastError, Error: s.Text().Error(err)})
 			return
 		}
-		s.emit(UIEvent{LoadingID: id, DoneTitle: "Fetched", DoneBody: remote, DoneKind: ui.ToastSuccess, Refresh: true})
+		s.emit(UIEvent{LoadingID: id, DoneTitle: s.Text().Fetched, DoneBody: remote, DoneKind: ui.ToastSuccess, Refresh: true})
 	})
 }
 
@@ -397,7 +398,7 @@ func (s *Session) openStash(start func(func(context.Context))) {
 	start(func(ctx context.Context) {
 		entries, err := s.repo.Stashes(ctx)
 		if err != nil {
-			s.emit(UIEvent{Error: err.Error()})
+			s.emit(UIEvent{Error: s.Text().Error(err)})
 			return
 		}
 		s.emit(UIEvent{ShowStash: true, Stashes: entries})
@@ -424,13 +425,13 @@ func (s *Session) runStash(req StashRequest, start func(func(context.Context)), 
 		}
 		entries, listErr := s.repo.Stashes(ctx)
 		if listErr != nil {
-			s.emit(UIEvent{Error: listErr.Error()})
+			s.emit(UIEvent{Error: s.Text().Error(listErr)})
 			return
 		}
 		// An operation result updates the list, without reopening a dialog
 		// the user dismissed while git was running. Publish refresh together
 		// with the entries so the refresh cannot invalidate a later event.
-		s.emit(UIEvent{UpdateStash: true, Stashes: entries, Toast: "Stash updated", Refresh: true})
+		s.emit(UIEvent{UpdateStash: true, Stashes: entries, Toast: s.Text().StashUpdated, Refresh: true})
 	})
 }
 
@@ -458,24 +459,24 @@ func (s *Session) applyRemotes(ctx context.Context, changes []RemoteChange, refr
 			return
 		}
 	}
-	s.emit(UIEvent{Toast: "Remotes saved", Refresh: true})
+	s.emit(UIEvent{Toast: s.Text().RemotesSaved, Refresh: true})
 }
 
 func (s *Session) runMerge(ref string, start func(func(context.Context)), refresh func()) {
 	start(func(ctx context.Context) {
 		result := ops.New(s.runner, s.repo.Path).Merge(ctx, ref, ops.MergeOptions{})
 		if result.Outcome == ops.OutcomeConflicts {
-			s.emit(UIEvent{Error: "Merge conflicts in " + ref, Refresh: true})
+			s.emit(UIEvent{Error: s.Text().MergeConflicts(ref), Refresh: true})
 			return
 		}
-		s.finish(result.Err, "Merged "+ref)
+		s.finish(result.Err, s.Text().MergedBranch(ref))
 	})
 }
 
 func (s *Session) runRebase(ref string, start func(func(context.Context)), refresh func()) {
 	start(func(ctx context.Context) {
 		_, err := s.runner.Run(ctx, command.Cmd{Dir: s.repo.Path, Subcommand: "rebase", Args: []string{ref}, Write: true})
-		s.finish(err, "Rebased onto "+ref)
+		s.finish(err, s.Text().RebasedBranch(ref))
 	})
 }
 
@@ -493,7 +494,7 @@ func (s *Session) checkoutAndRebase(ref string, start func(func(context.Context)
 			}
 		}
 		_, err := s.runner.Run(ctx, command.Cmd{Dir: s.repo.Path, Subcommand: "rebase", Args: []string{ref}, Write: true})
-		s.finish(err, "Checked out and rebased "+local)
+		s.finish(err, s.Text().CheckedOutRebased(local))
 	})
 }
 
@@ -522,7 +523,7 @@ func (s *Session) ApplyUI(event UIEvent) {
 	}
 	if event.Error != "" {
 		s.Panel.Error = event.Error
-		s.Toaster.Show("Git error", event.Error, ui.ToastError)
+		s.Toaster.Show(s.Text().GitError, event.Error, ui.ToastError)
 	}
 	if event.Toast != "" {
 		kind := event.ToastKind
@@ -558,7 +559,7 @@ func (s *Session) ApplyUI(event UIEvent) {
 
 func (s *Session) finish(err error, ok string) {
 	if err != nil {
-		s.emit(UIEvent{Error: err.Error()})
+		s.emit(UIEvent{Error: s.Text().Error(err)})
 		return
 	}
 	s.emit(UIEvent{Toast: ok, Refresh: ok != ""})
@@ -606,3 +607,31 @@ func (s *Session) SetSnapshot(snap repo.Snapshot, ahead map[string][2]int) {
 
 // CredentialProvider returns the dialog as the askpass provider.
 func (s *Session) CredentialProvider() ops.CredentialProvider { return &s.Credentials }
+
+// SetMessages shares the window's active catalogue with every dialog.
+func (s *Session) SetMessages(messages *i18n.Messages) {
+	s.UseMessages(messages)
+	s.Panel.UseMessages(messages)
+	s.Checkout.UseMessages(messages)
+	s.NewBranch.UseMessages(messages)
+	s.Rename.UseMessages(messages)
+	s.Delete.UseMessages(messages)
+	s.Push.UseMessages(messages)
+	s.Pull.UseMessages(messages)
+	s.Stash.UseMessages(messages)
+	s.Remotes.UseMessages(messages)
+	s.Credentials.UseMessages(messages)
+	for i := range s.Panel.Nodes {
+		n := &s.Panel.Nodes[i]
+		if n.Kind == KindGroup {
+			switch n.Group {
+			case "local":
+				n.Label = messages.Local
+			case "tags":
+				n.Label = messages.Tags
+			}
+		}
+	}
+
+	s.Panel.cacheLabels()
+}

@@ -2,7 +2,7 @@
 package diff
 
 import (
-	"fmt"
+	"github.com/runbrick/r-git/internal/i18n"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -17,6 +17,7 @@ import (
 const lineHeight float32 = 24
 
 var owners atomic.Uint32
+var policies = []string{"Default", "Ignore whitespace", "Ignore trailing whitespace"}
 
 type line struct {
 	text, number string
@@ -33,6 +34,7 @@ type row struct {
 // invalidates all text caches. Stable TextIdentity values let Viva retain shaped
 // and rasterized text across scrolling; Draw never tokenizes or shapes lines.
 type View struct {
+	i18n.Locale
 	Title            string
 	Unified          bool
 	Policy           textdiff.Policy
@@ -144,7 +146,7 @@ func (v *View) rebuildRows() {
 	v.updateStatus()
 }
 
-func (v *View) updateStatus()            { v.status = fmt.Sprintf("Change %d of %d", v.current+1, len(v.changes)) }
+func (v *View) updateStatus()            { v.status = v.Text().ChangePosition(v.current+1, len(v.changes)) }
 func (v *View) CurrentChange() int       { return v.current }
 func (v *View) VisibleRange() (int, int) { return v.first, v.last }
 func (v *View) Next()                    { v.navigate(1) }
@@ -204,21 +206,20 @@ func (v *View) Page(c ui.C) {
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Pad(8).Gap(8).Items(ui.Center).Children(func() {
 			ui.Text(c, v.Title).Bold().Grow(1)
-			if controls.IconButton(c, icons.Pair(c, icons.Up, icons.Up_dark), "Previous change").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Up, icons.Up_dark), v.Text().PreviousChange).Clicked() {
 				v.Previous()
 			}
-			if controls.IconButton(c, icons.Pair(c, icons.Down, icons.Down_dark), "Next change").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Down, icons.Down_dark), v.Text().NextChange).Clicked() {
 				v.Next()
 			}
 			ui.Text(c, v.status).Muted()
 			old := v.Unified
-			ui.Checkbox(c, &v.Unified, "Unified")
+			ui.Checkbox(c, &v.Unified, v.Text().Unified)
 			if old != v.Unified {
 				v.rebuildRows()
 			}
-			policies := []string{"Default", "Ignore whitespace", "Ignore trailing whitespace"}
 			policy := policies[int(v.Policy)]
-			ui.Select(c, &policy, policies, nil).Label("Comparison policy")
+			ui.Select(c, &policy, policies, v.Text().PolicyChoice).Label(v.Text().ComparisonPolicy)
 			if policy != policies[int(v.Policy)] {
 				for i, p := range policies {
 					if p == policy {
@@ -227,11 +228,11 @@ func (v *View) Page(c ui.C) {
 				}
 				v.SetContent(v.Title, strings.Join(v.Result.A, "\n"), strings.Join(v.Result.B, "\n"))
 			}
-			if v.OnClose != nil && controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), "Close diff").Clicked() {
+			if v.OnClose != nil && controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), v.Text().CloseDiff).Clicked() {
 				c.After(v.OnClose)
 			}
 		})
-		ui.Control(c, "Diff content (F7 next, Shift+F7 previous)", &v.input).Fill().Clip().Draw(v.draw)
+		ui.Control(c, v.Text().DiffContentF7NextShiftF7Previous, &v.input).Fill().Clip().Draw(v.draw)
 	})
 }
 
@@ -311,3 +312,5 @@ func (v *View) drawLine(d *ui.DrawContext, bounds gfx.Rect, index int, left, cha
 	d.Canvas.Unclip()
 	d.Canvas.Unclip()
 }
+
+func (v *View) SetMessages(messages *i18n.Messages) { v.UseMessages(messages); v.updateStatus() }

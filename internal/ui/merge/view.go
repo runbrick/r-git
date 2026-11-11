@@ -2,7 +2,7 @@
 package merge
 
 import (
-	"fmt"
+	"github.com/runbrick/r-git/internal/i18n"
 
 	textdiff "github.com/runbrick/r-git/internal/diff"
 	"github.com/runbrick/r-git/internal/git/ops"
@@ -12,7 +12,11 @@ import (
 	"github.com/vivaui/viva/ui"
 )
 
+type chunkLabels struct{ description, left, right string }
+
 type View struct {
+	labels []chunkLabels
+	i18n.Locale
 	Conflicts []ops.Conflict
 	Path      string
 	Content   ops.ConflictContent
@@ -47,6 +51,7 @@ func (v *View) SetFile(path string, content ops.ConflictContent) {
 	v.right.Unified = true
 	v.left.SetContent(content.LeftLabel, content.Left, content.Left)
 	v.right.SetContent(content.RightLabel, content.Right, content.Right)
+	v.cacheLabels()
 }
 
 func (v *View) noteEdit() {
@@ -71,8 +76,8 @@ func (v *View) choose(index int, side textdiff.Side) {
 func (v *View) Page(c ui.C) {
 	ui.Column(c).Fill().Gap(8).Pad(12).Children(func() {
 		ui.Row(c).FillWidth().Gap(8).Items(ui.Center).Children(func() {
-			ui.Text(c, "Conflicts").Bold().Grow(1)
-			if v.OnClose != nil && controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), "Close conflicts").Clicked() {
+			ui.Text(c, v.Text().Conflicts).Bold().Grow(1)
+			if v.OnClose != nil && controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), v.Text().CloseConflicts).Clicked() {
 				c.After(v.OnClose)
 			}
 		})
@@ -90,18 +95,21 @@ func (v *View) Page(c ui.C) {
 					ui.Text(c, v.Error).Color(c.Theme().Danger)
 				}
 				if v.Busy {
-					ui.Text(c, "Loading or saving conflict…").Muted()
+					ui.Text(c, v.Text().LoadingConflict).Muted()
 				}
 				if v.Merge == nil {
-					ui.Text(c, "Select a conflicted file").Muted()
+					ui.Text(c, v.Text().SelectAConflictedFile).Muted()
 					return
 				}
 				ui.Text(c, v.Path).Bold()
 				ui.Row(c).Fill().Gap(8).Children(func() {
-					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() { ui.Text(c, v.Content.LeftLabel).Bold(); v.left.Content(c, "Yours content") })
 					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() {
-						ui.Text(c, "Result").Bold()
-						area := ui.TextArea(c, &v.resultField, "Merge result", "").Fill().Disabled(v.Busy)
+						ui.Text(c, v.Text().ConflictSide(v.Content.LeftLabel)).Bold()
+						v.left.Content(c, v.Text().YoursContent)
+					})
+					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() {
+						ui.Text(c, v.Text().Result).Bold()
+						area := ui.TextArea(c, &v.resultField, v.Text().MergeResult, "").Fill().Disabled(v.Busy)
 						// TextArea bound to a string keeps its own copy and writes
 						// that copy back on the next frame, which replaced an
 						// Accept click with the previous result.
@@ -110,56 +118,55 @@ func (v *View) Page(c ui.C) {
 							v.manual = true
 						}
 					})
-					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() { ui.Text(c, v.Content.RightLabel).Bold(); v.right.Content(c, "Theirs content") })
+					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() {
+						ui.Text(c, v.Text().ConflictSide(v.Content.RightLabel)).Bold()
+						v.right.Content(c, v.Text().TheirsContent)
+					})
 				})
 				ui.List(c, &v.hunks, len(v.Merge.Chunks), func(row ui.ListRow) {
 					i := row.Index
 					chunk := v.Merge.Chunks[i]
 					c := row.C
 					row.Element.Height(40).Gap(8).Items(ui.Center).Children(func() {
-						kind := "Change"
-						if chunk.Conflict {
-							kind = "Conflict"
-						}
-						ui.Text(c, fmt.Sprintf("%s %d · base lines %d–%d", kind, i+1, chunk.Start+1, max(chunk.Start+1, chunk.End))).Grow(1)
+						ui.Text(c, v.labels[i].description).Grow(1)
 						if chunk.Choice != textdiff.Unresolved {
-							ui.Text(c, "Accepted").Color(c.Theme().Success)
+							ui.Text(c, v.Text().Accepted).Color(c.Theme().Success)
 						}
-						if controls.IconButton(c, icons.Pair(c, icons.Left, icons.Left_dark), fmt.Sprintf("Accept Yours %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
+						if controls.IconButton(c, icons.Pair(c, icons.Left, icons.Left_dark), v.labels[i].left).Disabled(v.Busy || v.manual).Clicked() {
 							v.choose(i, textdiff.Left)
 						}
-						if controls.IconButton(c, icons.Pair(c, icons.Right, icons.Right_dark), fmt.Sprintf("Accept Theirs %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
+						if controls.IconButton(c, icons.Pair(c, icons.Right, icons.Right_dark), v.labels[i].right).Disabled(v.Busy || v.manual).Clicked() {
 							v.choose(i, textdiff.Right)
 						}
 					})
-				}).Label("Conflict chunks").FillWidth().Height(120).Shrink(0)
+				}).Label(v.Text().ConflictChunks).FillWidth().Height(120).Shrink(0)
 				ui.Row(c).FillWidth().Gap(8).Children(func() {
-					if ui.Button(c, "Accept Yours").Outline().Disabled(v.Busy).Clicked() {
+					if ui.Button(c, v.Text().AcceptYours).Outline().Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Left
 						v.resultField.SetText(v.Result)
 						v.noteEdit()
 					}
-					if ui.Button(c, "Accept Theirs").Outline().Disabled(v.Busy).Clicked() {
+					if ui.Button(c, v.Text().AcceptTheirs).Outline().Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Right
 						v.resultField.SetText(v.Result)
 						v.noteEdit()
 					}
-					if ui.Button(c, "Apply non-conflicting changes").Outline().Disabled(v.Busy || v.manual).Clicked() {
+					if ui.Button(c, v.Text().ApplyNonConflictingChanges).Outline().Disabled(v.Busy || v.manual).Clicked() {
 						v.Merge.ApplyNonConflicting()
 						v.Result = v.Merge.Result()
 						v.resultField.SetText(v.Result)
 						v.noteEdit()
 					}
 					if v.manual {
-						ui.Text(c, "Result edited manually").Muted()
-						if ui.Button(c, "Reset result to chunk choices").Outline().Disabled(v.Busy).Clicked() {
+						ui.Text(c, v.Text().ResultEditedManually).Muted()
+						if ui.Button(c, v.Text().ResetResultToChunkChoices).Outline().Disabled(v.Busy).Clicked() {
 							v.manual = false
 							v.Result = v.Merge.Result()
 							v.resultField.SetText(v.Result)
 						}
 					}
 					ui.Spacer(c)
-					if ui.Button(c, "Mark resolved").Outline().Disabled(v.Busy || !v.manual && v.Merge.Remaining() > 0).Clicked() && v.OnResolve != nil {
+					if ui.Button(c, v.Text().MarkResolved).Outline().Disabled(v.Busy || !v.manual && v.Merge.Remaining() > 0).Clicked() && v.OnResolve != nil {
 						path, data := v.Path, []byte(v.Result)
 						c.After(func() { v.OnResolve(path, data) })
 					}
@@ -167,4 +174,26 @@ func (v *View) Page(c ui.C) {
 			})
 		})
 	})
+}
+
+func (v *View) SetMessages(messages *i18n.Messages) {
+	v.UseMessages(messages)
+	v.left.SetMessages(messages)
+	v.right.SetMessages(messages)
+	v.cacheLabels()
+}
+
+func (v *View) cacheLabels() {
+	v.labels = nil
+	if v.Merge == nil {
+		return
+	}
+	v.labels = make([]chunkLabels, len(v.Merge.Chunks))
+	for i, chunk := range v.Merge.Chunks {
+		kind := v.Text().Change
+		if chunk.Conflict {
+			kind = v.Text().Conflict
+		}
+		v.labels[i] = chunkLabels{v.Text().ChunkDescription(kind, i+1, chunk.Start+1, max(chunk.Start+1, chunk.End)), v.Text().AcceptYoursNumber(i + 1), v.Text().AcceptTheirsNumber(i + 1)}
+	}
 }

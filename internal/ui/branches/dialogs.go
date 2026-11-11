@@ -1,7 +1,7 @@
 package branches
 
 import (
-	"fmt"
+	"github.com/runbrick/r-git/internal/i18n"
 	"strings"
 
 	"github.com/runbrick/r-git/internal/config"
@@ -10,9 +10,13 @@ import (
 	"github.com/vivaui/viva/ui"
 )
 
-// CheckoutDialog offers "Stash and checkout" when checkout fails because
+// CheckoutDialog offers d.Text().StashAndCheckout when checkout fails because
 // local changes would be overwritten. The typed error's file list is shown.
 type CheckoutDialog struct {
+	titleText  i18n.NameText
+	promptText i18n.NameText
+
+	i18n.Locale
 	Open      bool
 	Branch    string
 	Files     []string
@@ -34,21 +38,21 @@ func (d *CheckoutDialog) Page(c ui.C) {
 	if !d.Open {
 		return
 	}
-	title := "Checkout " + d.Branch
-	ui.Modal(c, &d.Open, title, func() {
+	title := d.titleText.Get(d.Text(), d.Branch, d.Text().CheckoutTitle)
+	ui.ModalWith(c, &d.Open, title, ui.ModalSpec{NoClose: d.Text() != &i18n.En}, func() {
 		ui.Column(c).Gap(8).Children(func() {
-			ui.Text(c, "Local changes would be overwritten by checkout.")
+			ui.Text(c, d.Text().LocalChangesWouldBeOverwrittenByCheckout)
 			for _, file := range d.Files {
 				ui.Text(c, file).FontSize(12).Muted()
 			}
-			ui.Text(c, "Stash the changes and check out "+d.Branch+"?")
+			ui.Text(c, d.promptText.Get(d.Text(), d.Branch, d.Text().StashCheckoutPrompt))
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, d.Text().Cancel).Outline().Clicked() {
 			d.Open = false
 			d.Cancelled = true
 		}
-		if ui.Button(c, "Stash and checkout").Clicked() {
+		if ui.Button(c, d.Text().StashAndCheckout).Clicked() {
 			d.Open = false
 			d.Confirmed = true
 		}
@@ -57,6 +61,9 @@ func (d *CheckoutDialog) Page(c ui.C) {
 
 // NewBranchDialog creates a branch from a start point.
 type NewBranchDialog struct {
+	fromText i18n.NameText
+
+	i18n.Locale
 	Open       bool
 	Name       string
 	StartPoint string
@@ -78,10 +85,10 @@ func (d *NewBranchDialog) Page(c ui.C) {
 	if !d.Open {
 		return
 	}
-	ui.Modal(c, &d.Open, "New branch", func() {
+	ui.ModalWith(c, &d.Open, d.Text().NewBranch, ui.ModalSpec{NoClose: d.Text() != &i18n.En}, func() {
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
-			ui.Text(c, "From "+d.StartPoint).FontSize(12).Muted()
-			field := ui.TextField(c, &d.Name, "Branch name", "feature")
+			ui.Text(c, d.fromText.Get(d.Text(), d.StartPoint, d.Text().FromRef)).FontSize(12).Muted()
+			field := ui.TextField(c, &d.Name, d.Text().BranchName, "feature")
 			if field.Submitted() {
 				d.confirm()
 			}
@@ -90,10 +97,10 @@ func (d *NewBranchDialog) Page(c ui.C) {
 			}
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, d.Text().Cancel).Outline().Clicked() {
 			d.Open = false
 		}
-		if ui.Button(c, "Create branch").Clicked() {
+		if ui.Button(c, d.Text().CreateBranch).Clicked() {
 			d.confirm()
 		}
 	})
@@ -101,7 +108,7 @@ func (d *NewBranchDialog) Page(c ui.C) {
 
 func (d *NewBranchDialog) confirm() {
 	if strings.TrimSpace(d.Name) == "" {
-		d.Error = "Enter a branch name."
+		d.Error = d.Text().EnterABranchName
 		return
 	}
 	d.Confirmed = true
@@ -110,6 +117,9 @@ func (d *NewBranchDialog) confirm() {
 
 // RenameDialog renames a local branch.
 type RenameDialog struct {
+	titleText i18n.NameText
+
+	i18n.Locale
 	Open      bool
 	Old       string
 	Name      string
@@ -129,13 +139,13 @@ func (d *RenameDialog) Page(c ui.C) {
 	if !d.Open {
 		return
 	}
-	ui.Modal(c, &d.Open, "Rename "+d.Old, func() {
-		ui.TextField(c, &d.Name, "New name", "")
+	ui.ModalWith(c, &d.Open, d.titleText.Get(d.Text(), d.Old, d.Text().RenameTitle), ui.ModalSpec{NoClose: d.Text() != &i18n.En}, func() {
+		ui.TextField(c, &d.Name, d.Text().NewName, "")
 	}, func() {
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, d.Text().Cancel).Outline().Clicked() {
 			d.Open = false
 		}
-		if ui.Button(c, "Rename").Clicked() && strings.TrimSpace(d.Name) != "" {
+		if ui.Button(c, d.Text().Rename).Clicked() && strings.TrimSpace(d.Name) != "" {
 			d.Confirmed = true
 			d.Open = false
 		}
@@ -145,6 +155,10 @@ func (d *RenameDialog) Page(c ui.C) {
 // DeleteDialog confirms deletion. Unmerged is set when git refused a
 // non-force delete; confirming then force-deletes.
 type DeleteDialog struct {
+	titleText  i18n.NameText
+	promptText i18n.NameText
+
+	i18n.Locale
 	Open      bool
 	Branch    string
 	Unmerged  *ops.ErrNotFullyMerged
@@ -175,22 +189,22 @@ func (d *DeleteDialog) Page(c ui.C) {
 	if !d.Open {
 		return
 	}
-	ui.Modal(c, &d.Open, "Delete "+d.Branch, func() {
+	ui.ModalWith(c, &d.Open, d.titleText.Get(d.Text(), d.Branch, d.Text().DeleteTitle), ui.ModalSpec{NoClose: d.Text() != &i18n.En}, func() {
 		ui.Column(c).Gap(8).Children(func() {
 			if d.Unmerged == nil {
-				ui.Text(c, "Delete branch "+d.Branch+"?")
+				ui.Text(c, d.promptText.Get(d.Text(), d.Branch, d.Text().DeleteBranchPrompt))
 				return
 			}
-			ui.Text(c, fmt.Sprintf("Branch %s is not fully merged to %s.", d.Unmerged.Branch, d.Unmerged.Base))
-			ui.Text(c, fmt.Sprintf("%d unmerged commits. Delete anyway?", len(d.Unmerged.Commits))).FontSize(12).Muted()
+			ui.Text(c, d.Text().NotFullyMerged(d.Unmerged.Branch, d.Unmerged.Base))
+			ui.Text(c, d.Text().UnmergedCount(len(d.Unmerged.Commits))).FontSize(12).Muted()
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, d.Text().Cancel).Outline().Clicked() {
 			d.Open = false
 		}
-		label := "Delete"
+		label := d.Text().Delete
 		if d.Unmerged != nil {
-			label = "Force delete"
+			label = d.Text().ForceDelete
 		}
 		if ui.Button(c, label).Clicked() {
 			d.Confirmed = true
@@ -211,6 +225,7 @@ type PushTarget struct {
 
 // PushDialog lists outgoing commits per branch and collects push options.
 type PushDialog struct {
+	i18n.Locale
 	Open       bool
 	Targets    []PushTarget
 	ForceLease bool
@@ -238,7 +253,7 @@ func (d *PushDialog) Show(targets []PushTarget, allowForce bool) {
 	d.ShowResults = false
 }
 
-// ShowRejected opens the per-ref result view and offers "Pull then push"
+// ShowRejected opens the per-ref result view and offers d.Text().PullThenPush
 // when a rejection is a non-fast-forward.
 func (d *PushDialog) ShowRejected(results []ops.PushNativeResult) {
 	d.Open = true
@@ -253,11 +268,11 @@ func (d *PushDialog) Page(c ui.C) {
 	if !d.Open {
 		return
 	}
-	title := "Push"
+	title := d.Text().Push
 	if d.ShowResults {
-		title = "Push results"
+		title = d.Text().PushResults
 	}
-	ui.Modal(c, &d.Open, title, func() {
+	ui.ModalWith(c, &d.Open, title, ui.ModalSpec{NoClose: d.Text() != &i18n.En}, func() {
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
 			if d.ShowResults {
 				d.results(c)
@@ -267,21 +282,21 @@ func (d *PushDialog) Page(c ui.C) {
 		})
 	}, func() {
 		if d.ShowResults {
-			if ui.Button(c, "Close").Outline().Clicked() {
+			if ui.Button(c, d.Text().Close).Outline().Clicked() {
 				d.Open = false
 			}
-			if RejectedNonFF(d.Results) && ui.Button(c, "Pull then push").Clicked() {
+			if RejectedNonFF(d.Results) && ui.Button(c, d.Text().PullThenPush).Clicked() {
 				d.PullThenPush = true
 				d.Open = false
 			}
 			return
 		}
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, d.Text().Cancel).Outline().Clicked() {
 			d.Open = false
 		}
-		if ui.Button(c, "Push commits").Clicked() {
+		if ui.Button(c, d.Text().PushCommits).Clicked() {
 			if d.selectedCount() == 0 {
-				d.Error = "Select a branch to push."
+				d.Error = d.Text().SelectABranchToPush
 				return
 			}
 			d.Confirmed = true
@@ -292,7 +307,7 @@ func (d *PushDialog) Page(c ui.C) {
 
 func (d *PushDialog) form(c ui.C) {
 	if len(d.Targets) == 0 {
-		ui.Text(c, "Nothing to push.")
+		ui.Text(c, d.Text().NothingToPush)
 		return
 	}
 	for i := range d.Targets {
@@ -305,11 +320,11 @@ func (d *PushDialog) form(c ui.C) {
 				d.Targets[i].Selected = !d.Targets[i].Selected
 			}
 			ui.Row(c).Gap(8).Children(func() {
-				ui.TextField(c, &target.Remote, "Remote", "origin").Grow(1)
-				ui.TextField(c, &target.Target, "Target branch", target.Branch).Grow(1)
+				ui.TextField(c, &target.Remote, d.Text().Remote, "origin").Grow(1)
+				ui.TextField(c, &target.Target, d.Text().TargetBranch, target.Branch).Grow(1)
 			})
 			if len(target.Commits) == 0 {
-				ui.Text(c, "No outgoing commits").FontSize(12).Muted()
+				ui.Text(c, d.Text().NoOutgoingCommits).FontSize(12).Muted()
 			}
 			for _, commit := range target.Commits {
 				ui.Text(c, commit.Subject).FontSize(12)
@@ -317,9 +332,9 @@ func (d *PushDialog) form(c ui.C) {
 		})
 	}
 	if d.AllowForce {
-		ui.Checkbox(c, &d.ForceLease, "Force with lease")
+		ui.Checkbox(c, &d.ForceLease, d.Text().ForceWithLease)
 	}
-	ui.Checkbox(c, &d.PushTags, "Push tags")
+	ui.Checkbox(c, &d.PushTags, d.Text().PushTags)
 	if d.Error != "" {
 		ui.Text(c, d.Error).Color(c.Theme().Danger).FontSize(12)
 	}
@@ -327,14 +342,14 @@ func (d *PushDialog) form(c ui.C) {
 
 func (d *PushDialog) results(c ui.C) {
 	if len(d.Results) == 0 {
-		ui.Text(c, "Push produced no per-ref results.")
+		ui.Text(c, d.Text().PushProducedNoPerRefResults)
 		return
 	}
 	for i, result := range d.Results {
-		ui.Text(c.KeyInt(i), resultLine(result)).FontSize(12)
+		ui.Text(c.KeyInt(i), d.resultLine(result)).FontSize(12)
 	}
 	if RejectedNonFF(d.Results) {
-		ui.Text(c, "A branch was rejected. Pull, then push again?")
+		ui.Text(c, d.Text().ABranchWasRejectedPullThenPushAgain)
 	}
 }
 
@@ -348,8 +363,13 @@ func (d *PushDialog) selectedCount() int {
 	return n
 }
 
-func resultLine(result ops.PushNativeResult) string {
-	text := ops.PushResultToString(result.Type) + " " + result.SourceRef
+func (d *PushDialog) resultLine(result ops.PushNativeResult) string {
+	types := [...]string{d.Text().PushSuccess, d.Text().PushForced, d.Text().PushNew, d.Text().PushRejected, d.Text().PushDeleted, d.Text().PushUpToDate, d.Text().PushError}
+	kind := d.Text().PushError
+	if int(result.Type) >= 0 && int(result.Type) < len(types) {
+		kind = types[result.Type]
+	}
+	text := kind + " " + result.SourceRef
 	if result.Reason != "" {
 		text += " (" + result.Reason + ")"
 	}
@@ -358,6 +378,7 @@ func resultLine(result ops.PushNativeResult) string {
 
 // PullDialog collects remote, branch, and merge or rebase.
 type PullDialog struct {
+	i18n.Locale
 	Open      bool
 	Remote    string
 	Branch    string
@@ -384,19 +405,19 @@ func (d *PullDialog) Page(c ui.C) {
 	if !d.Open {
 		return
 	}
-	ui.Modal(c, &d.Open, "Pull", func() {
+	ui.ModalWith(c, &d.Open, d.Text().Pull, ui.ModalSpec{NoClose: d.Text() != &i18n.En}, func() {
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
-			ui.TextField(c, &d.Remote, "Remote", "origin")
-			ui.TextField(c, &d.Branch, "Branch", "")
-			ui.Text(c, "Update method").FontSize(12).Muted()
-			merge := ui.Button(c, "Merge")
+			ui.TextField(c, &d.Remote, d.Text().Remote, "origin")
+			ui.TextField(c, &d.Branch, d.Text().Branch, "")
+			ui.Text(c, d.Text().UpdateMethod).FontSize(12).Muted()
+			merge := ui.Button(c, d.Text().Merge)
 			if d.Method == config.UpdateMerge {
 				merge.Bold()
 			}
 			if merge.Clicked() {
 				d.Method = config.UpdateMerge
 			}
-			rebase := ui.Button(c, "Rebase")
+			rebase := ui.Button(c, d.Text().Rebase)
 			if d.Method == config.UpdateRebase {
 				rebase.Bold()
 			}
@@ -408,12 +429,12 @@ func (d *PullDialog) Page(c ui.C) {
 			}
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, d.Text().Cancel).Outline().Clicked() {
 			d.Open = false
 		}
-		if ui.Button(c, "Pull now").Clicked() {
+		if ui.Button(c, d.Text().PullNow).Clicked() {
 			if strings.TrimSpace(d.Remote) == "" {
-				d.Error = "Enter a remote."
+				d.Error = d.Text().EnterARemote
 				return
 			}
 			d.Confirmed = true
