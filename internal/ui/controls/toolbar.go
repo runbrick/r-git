@@ -20,3 +20,12 @@ func IconButton(c ui.C, icon gfx.Icon, label string) ui.Box {
 			Hover(ui.Look{}.Color(t.Foreground))
 	})
 }
+
+// TextButton retains an action's accessible name when its compact caption
+// differs (for example Commit versus the existing Commit changes action).
+func TextButton(c ui.C, label, caption string) ui.Box {
+	t := c.Theme()
+	return ui.ButtonBase(c, label).Height(28).PadX(8).Radius(t.Metrics.RadiusControl).Border(1, t.Input).
+		Hover(ui.Look{}.Background(t.Hover)).Pressed(ui.Look{}.Background(t.Muted)).Focus(ui.Look{}.Ring(2, t.Ring)).
+		Children(func() { ui.Text(c, caption).FontSize(13) })
+}

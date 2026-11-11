@@ -234,3 +234,17 @@ func ParseNameStatusZ(data []byte) ([]model.FileChange, error) {
 	}
 	return changes, nil
 }
+
+// ContainingBranches returns all local and remote branch names containing a
+// commit, regardless of the currently loaded history page or branch filter.
+func (r *Repo) ContainingBranches(ctx context.Context, hash model.Hash) ([]string, error) {
+	out, err := r.run(ctx, "for-each-ref", "--contains="+hash.String(), "--format=%(refname:short)", "refs/heads/", "refs/remotes/")
+	if err != nil {
+		return nil, err
+	}
+	text := strings.TrimSpace(string(out.Stdout))
+	if text == "" {
+		return nil, nil
+	}
+	return strings.Split(text, "\n"), nil
+}

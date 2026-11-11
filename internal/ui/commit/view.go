@@ -25,6 +25,7 @@ const (
 
 // Node is one visible row. Children of a collapsed branch are omitted.
 type Node struct {
+	Count    int
 	Kind     NodeKind
 	Group    repo.ChangeGroup
 	Depth    int
@@ -63,9 +64,12 @@ const (
 
 // View is the changes tree and the commit form.
 type View struct {
-	Entries []repo.ChangeEntry
-	Busy    bool
-	Error   string
+	Entries     []repo.ChangeEntry
+	Busy        bool
+	Error       string
+	OnRefresh   func()
+	optionsOpen bool
+	amendMenu   bool
 
 	// OnRequest runs after the paint, on the window thread. The shell
 	// starts the git work and publishes the result.
@@ -153,6 +157,7 @@ func (v *View) Page(c ui.C) {
 	}
 	v.rowC = c
 	ui.Column(c).Fill().Children(func() {
+		ui.Row(c).Height(32).FillWidth().PadX(12).Items(ui.Center).Border(1, c.Theme().Border).Children(func() { ui.Text(c, "Commit").FontSize(13) })
 		v.treePane(c)
 		ui.Divider(c)
 		v.formPane(c)
@@ -164,10 +169,24 @@ func (v *View) Page(c ui.C) {
 func (v *View) treePane(c ui.C) {
 	theme := c.Theme()
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
-		ui.Row(c).FillWidth().PadX(12).PadY(8).Background(theme.Card).Children(func() {
-			ui.Text(c, "Changes").Bold()
+		ui.Row(c).FillWidth().Height(36).PadX(8).Gap(4).Items(ui.Center).Background(theme.Background).Children(func() {
+			if controls.IconButton(c, icons.Pair(c, icons.Refresh, icons.Refresh_dark), "Refresh changes").Disabled(v.OnRefresh == nil || v.Busy).Clicked() {
+				c.After(v.OnRefresh)
+			}
+			if node, ok := v.actionNode(); ok {
+				v.rowActions(c, node)
+			}
 			ui.Spacer(c)
-			ui.Text(c, countLabel(len(v.Entries))).FontSize(12).Muted()
+			options := controls.IconButton(c, icons.Pair(c, icons.More, icons.More_dark), "Commit options")
+			if options.Clicked() {
+				v.optionsOpen = !v.optionsOpen
+			}
+			ui.Popover(c, options, &v.optionsOpen, func() {
+				ui.Column(c).Width(250).Pad(8).Gap(8).Children(func() {
+					ui.Checkbox(c, &v.SignOff, "Sign-off")
+					ui.TextField(c, &v.Author, "Author", "Name <email>")
+				})
+			})
 		})
 		if len(v.nodes) == 0 {
 			ui.Column(c).Fill().Pad(16).Children(func() {
@@ -176,6 +195,9 @@ func (v *View) treePane(c ui.C) {
 			return
 		}
 		ui.Tree(c, &v.tree, len(v.nodes), v.rowLabel, v.rowContent).Grow(1)
+		if i, ok := v.tree.Chosen(); ok {
+			c.After(func() { v.tree.Select(i) })
+		}
 		if i, ok := v.tree.Toggled(); ok {
 			v.toggle(i)
 		}
@@ -194,27 +216,51 @@ func (v *View) rowContent(i int) {
 	c := v.rowC
 	theme := c.Theme()
 	switch node.Kind {
-	case NodeGroup:
-		ui.Text(c, node.Label).Bold().FontSize(12)
-	case NodeDir:
-		ui.Text(c, node.Label).FontSize(13)
+	case NodeGroup, NodeDir:
+		on := node.Included
+		if ui.Checkbox(c.Key(branchKey(node)), &on, "").Label("Include " + node.Label).Changed() {
+			for _, entry := range v.Entries {
+				if entry.Group == node.Group && (node.Kind == NodeGroup || strings.HasPrefix(entry.Path, node.Path+"/")) {
+					v.included[includeKey(entry.Group, entry.Path)] = on
+				}
+			}
+			c.After(v.rebuild)
+		}
+		if node.Kind == NodeDir {
+			ui.Icon(c, icons.Pair(c, icons.Folder, icons.Folder_dark)).Size(16, 16)
+		}
+		text := ui.Text(c, node.Label).FontSize(13)
+		if node.Kind == NodeGroup {
+			text.Bold()
+		}
+		ui.Text(c, countLabel(node.Count)).FontSize(12).Muted()
 	default:
 		on := node.Included
-		box := ui.Checkbox(c.Key(includeKey(node.Group, node.Path)), &on, "")
-		if box.Changed() {
+		if ui.Checkbox(c.Key(includeKey(node.Group, node.Path)), &on, "").Label("Include " + node.Path).Changed() {
 			v.included[includeKey(node.Group, node.Path)] = on
-			v.nodes[i].Included = on
+			c.After(v.rebuild)
 		}
-		ui.Text(c, node.Status.Letter()).Width(16).FontSize(12).Bold().Color(*statusColor(theme, node.Status))
-		row := ui.Row(c).Hit(ui.ID(c), node.Path).Gap(8).Items(ui.Center).Grow(1).Children(func() {
-			ui.Text(c, node.Label).FontSize(13).Color(*statusColor(theme, node.Status))
-			ui.Spacer(c)
-			v.rowActions(c, node)
+		ui.Icon(c, icons.File(c, node.Path)).Size(16, 16)
+		row := ui.Row(c).Hit(ui.ID(c), node.Path).Gap(4).Items(ui.Center).Grow(1).Children(func() {
+			ui.Text(c, node.Label).FontSize(13).Color(*statusColor(theme, node.Status)).Ellipsis().Grow(1)
 		})
-		ui.ContextMenu(c, row, func(menu *ui.MenuItems) {
-			v.menuFor(menu, node)
-		})
+		if row.Clicked() {
+			c.After(func() { v.tree.Select(i) })
+		}
+		ui.ContextMenu(c, row, func(menu *ui.MenuItems) { v.menuFor(menu, node) })
 	}
+}
+
+func (v *View) actionNode() (Node, bool) {
+	if i := v.tree.Selected(); i >= 0 && i < len(v.nodes) && v.nodes[i].Kind == NodeFile {
+		return v.nodes[i], true
+	}
+	for _, node := range v.nodes {
+		if node.Kind == NodeFile {
+			return node, true
+		}
+	}
+	return Node{}, false
 }
 
 func (v *View) rowActions(c ui.C, node Node) {
@@ -281,19 +327,30 @@ func (v *View) discardModal(c ui.C) {
 
 func (v *View) formPane(c ui.C) {
 	theme := c.Theme()
-	ui.Column(c).FillWidth().Pad(12).Gap(8).Background(theme.Background).Children(func() {
-		ui.Text(c, "Commit").FontSize(13).Bold()
+	ui.Column(c).FillWidth().Height(320).Pad(12).Gap(8).Background(theme.Background).Children(func() {
+		ui.Row(c).FillWidth().Gap(4).Items(ui.Center).Children(func() {
+			ui.Checkbox(c, &v.Amend, "Amend")
+			last := ui.ButtonBase(c, "last commit").Height(28).PadX(4).Gap(4).Tooltip("Amend last commit").Children(func() {
+				ui.Text(c, "last commit").FontSize(13).Color(theme.Primary)
+				ui.Icon(c, icons.Pair(c, icons.Down, icons.Down_dark)).Size(16, 16)
+			})
+			if last.Clicked() {
+				v.amendMenu = !v.amendMenu
+			}
+			ui.Menu(c, last, &v.amendMenu, func(menu *ui.MenuItems) {
+				if menu.Item("Amend last commit").Clicked() {
+					v.Amend = true
+				}
+			})
+		})
 		v.syncAmend()
-		ui.TextArea(c, &v.Message, "Commit message", "Describe the change").Height(120)
+		ui.TextArea(c, &v.Message, "Commit message", "Describe the change").Mono().FontSize(13).Grow(1).FillWidth()
 		if v.Error != "" {
 			ui.Text(c, v.Error).FontSize(12).Color(theme.Danger)
 		}
-		ui.Checkbox(c, &v.Amend, "Amend")
-		ui.Checkbox(c, &v.SignOff, "Sign-off")
-		ui.TextField(c, &v.Author, "Author", "Name <email>")
-		ui.Row(c).FillWidth().Gap(8).Children(func() {
-			commit := ui.Button(c, "Commit changes").Disabled(v.Busy)
-			push := ui.Button(c, "Commit and Push").Disabled(v.Busy)
+		ui.Row(c).FillWidth().Gap(6).Children(func() {
+			commit := controls.TextButton(c, "Commit changes", "Commit").Disabled(v.Busy)
+			push := controls.TextButton(c, "Commit and Push", "Commit and Push...").Disabled(v.Busy)
 			if commit.Clicked() {
 				v.submit(false)
 			}
@@ -393,7 +450,7 @@ func (v *View) nodeAt(i int) ui.TreeNode {
 		return ui.TreeNode{}
 	}
 	n := v.nodes[i]
-	return ui.TreeNode{Depth: n.Depth, Branch: n.Branch, Expanded: n.Expanded}
+	return ui.TreeNode{Depth: n.Depth, Branch: n.Branch, Expanded: n.Expanded, Selected: v.tree.Selected() == i}
 }
 
 func (v *View) nodeKey(i int) int {
@@ -420,7 +477,7 @@ func (v *View) rebuild() {
 			continue
 		}
 		sort.Slice(files, func(a, b int) bool { return files[a].Path < files[b].Path })
-		groupNode := Node{Kind: NodeGroup, Group: group, Label: group.String(), Branch: true, Path: group.String()}
+		groupNode := Node{Kind: NodeGroup, Group: group, Label: groupLabel(group), Count: len(files), Included: v.allIncluded(group, files), Branch: true, Path: group.String()}
 		groupNode.Expanded = v.isOpen(groupNode)
 		v.nodes = append(v.nodes, groupNode)
 		if !groupNode.Expanded {
@@ -463,7 +520,7 @@ func (v *View) appendDirs(group repo.ChangeGroup, files []repo.ChangeEntry, pref
 		if prefix != "" {
 			full = prefix + "/" + name
 		}
-		dirNode := Node{Kind: NodeDir, Group: group, Depth: depth, Label: name, Path: full, Branch: true}
+		dirNode := Node{Kind: NodeDir, Group: group, Depth: depth, Label: name, Count: len(b.files), Included: v.allIncluded(group, b.files), Path: full, Branch: true}
 		dirNode.Expanded = v.isOpen(dirNode)
 		v.nodes = append(v.nodes, dirNode)
 		if dirNode.Expanded {
@@ -546,4 +603,23 @@ func statusColor(theme *ui.Theme, status model.FileStatus) *ui.Color {
 	default:
 		return &theme.Foreground
 	}
+}
+
+func groupLabel(group repo.ChangeGroup) string {
+	switch group {
+	case repo.GroupUnstaged:
+		return "Changes"
+	case repo.GroupUnversioned:
+		return "Unversioned Files"
+	default:
+		return group.String()
+	}
+}
+func (v *View) allIncluded(group repo.ChangeGroup, files []repo.ChangeEntry) bool {
+	for _, entry := range files {
+		if !v.included[includeKey(group, entry.Path)] {
+			return false
+		}
+	}
+	return len(files) > 0
 }
