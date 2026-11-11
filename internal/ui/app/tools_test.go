@@ -40,7 +40,7 @@ func TestDriverModifiedFileDiffNavigation(t *testing.T) {
 	for _, appearance := range []viva.Appearance{viva.AppearanceLight, viva.AppearanceDark} {
 		t.Run(appearance.String(), func(t *testing.T) {
 			viva.SetNativeAppearance(appearance)
-			m, d := openDriver(t, g.Dir)
+			m, d := openDriverTheme(t, g.Dir, appearance.String())
 			waitFor(t, d, func() bool { return m.repo != nil && len(m.log.Details) > 0 })
 			// This is the exact callback contract used by a changes tree.
 			m.OnShowDiff(model.Hash{}, "file.txt")

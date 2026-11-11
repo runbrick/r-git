@@ -23,7 +23,6 @@ func TestSuccessfulCommitResetsOpenForm(t *testing.T) {
 			g.WriteFile("base.txt", "changed\n")
 			m, driver := openDriver(t, g.Dir)
 			waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
-			clickControl(t, driver, "Commit")
 			waitFor(t, driver, func() bool { return len(m.commit.Entries) > 0 })
 			clickControl(t, driver, "Commit message")
 			if err := driver.Type("next subject"); err != nil {
@@ -83,7 +82,6 @@ func TestCommitPanelGroupsStageCommitAmendAndDiscard(t *testing.T) {
 
 	m, driver := openDriver(t, g.Dir)
 	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
-	clickControl(t, driver, "Commit")
 	waitFor(t, driver, func() bool {
 		return hasLabel(driver, "Staged") && hasLabel(driver, "Unversioned") && hasLabel(driver, "added.txt")
 	})
@@ -201,7 +199,6 @@ func TestEmptyCommitMessageIsBlocked(t *testing.T) {
 	g.WriteFile("a.txt", "b\n")
 	m, driver := openDriver(t, g.Dir)
 	waitFor(t, driver, func() bool { return m.repo != nil && !m.log.Loading })
-	clickControl(t, driver, "Commit")
 	waitFor(t, driver, func() bool { return m.showCommit && len(m.commit.Entries) > 0 })
 	if err := driver.Pump(); err != nil {
 		t.Fatal(err)

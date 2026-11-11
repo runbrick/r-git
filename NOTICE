@@ -1,0 +1,14 @@
+r-git includes JetBrains IntelliJ New UI (expUI) icon sources and palette values.
+Copyright 2000-2024 JetBrains s.r.o. and contributors.
+Licensed under the Apache License, Version 2.0.
+
+Source: https://github.com/DetachHead/rebased (IntelliJ Platform sources)
+  platform/icons/src/expui/{toolwindows,vcs,general,nodes,fileTypes}/
+  platform/platform-resources/src/themes/expUI/expUI_dark.theme.json
+  platform/platform-resources/src/themes/expUI/expUI_light.theme.json
+
+Only icons used by the application are included under internal/ui/icons/svg.
+The SVG sources are unmodified except for their filenames. Viva's icon compiler
+produces internal/ui/icons/generated.go. The palette is adapted to Viva's
+semantic theme tokens in internal/ui/theme. The Apache 2.0 license is included
+in internal/ui/icons/LICENSE.txt, and original SVG copyright headers are kept.

@@ -9,6 +9,8 @@ import (
 
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/repo"
+	"github.com/runbrick/r-git/internal/ui/controls"
+	"github.com/runbrick/r-git/internal/ui/icons"
 	"github.com/vivaui/viva/ui"
 )
 
@@ -147,10 +149,10 @@ func (v *View) Page(c ui.C) {
 		v.tree.Node = v.nodeAt
 		v.tree.Key = v.nodeKey
 		v.tree.Label = v.rowLabel
-		v.tree.RowHeight = 28
+		v.tree.RowHeight = 22
 	}
 	v.rowC = c
-	ui.Row(c).Fill().Children(func() {
+	ui.Column(c).Fill().Children(func() {
 		v.treePane(c)
 		ui.Divider(c)
 		v.formPane(c)
@@ -161,7 +163,7 @@ func (v *View) Page(c ui.C) {
 
 func (v *View) treePane(c ui.C) {
 	theme := c.Theme()
-	ui.Column(c).Width(460).FillHeight().Children(func() {
+	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		ui.Row(c).FillWidth().PadX(12).PadY(8).Background(theme.Card).Children(func() {
 			ui.Text(c, "Changes").Bold()
 			ui.Spacer(c)
@@ -217,20 +219,20 @@ func (v *View) rowContent(i int) {
 
 func (v *View) rowActions(c ui.C, node Node) {
 	if node.Group != repo.GroupStaged && node.Group != repo.GroupConflicts {
-		if ui.Button(c.Key(node.Path+"-stage"), "Stage").Clicked() {
+		if controls.IconButton(c.Key(node.Path+"-stage"), icons.Pair(c, icons.Add, icons.Add_dark), "Stage").Clicked() {
 			v.emit(Request{Kind: RequestStage, Paths: []string{node.Path}})
 		}
 	}
 	if node.Group == repo.GroupStaged {
-		if ui.Button(c.Key(node.Path+"-unstage"), "Unstage").Clicked() {
+		if controls.IconButton(c.Key(node.Path+"-unstage"), icons.Pair(c, icons.Remove, icons.Remove_dark), "Unstage").Clicked() {
 			v.emit(Request{Kind: RequestUnstage, Paths: []string{node.Path}})
 		}
 	}
-	if ui.Button(c.Key(node.Path+"-rollback"), "Rollback").Clicked() {
+	if controls.IconButton(c.Key(node.Path+"-rollback"), icons.Pair(c, icons.Rollback, icons.Rollback_dark), "Rollback").Clicked() {
 		v.discardPath = node.Path
 		v.discardOpen = true
 	}
-	if ui.Button(c.Key(node.Path+"-diff"), "Diff").Clicked() {
+	if controls.IconButton(c.Key(node.Path+"-diff"), icons.Pair(c, icons.Diff, icons.Diff_dark), "Diff").Clicked() {
 		if v.OnShowDiff != nil {
 			v.OnShowDiff(model.Hash{}, node.Path)
 		}
@@ -266,7 +268,7 @@ func (v *View) discardModal(c ui.C) {
 	ui.Modal(c, &v.discardOpen, "Rollback changes", func() {
 		ui.Text(c, "Discard uncommitted changes to "+v.discardPath+"? This cannot be undone.")
 	}, func() {
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			v.discardOpen = false
 		}
 		if ui.Button(c, "Discard").Clicked() {
@@ -279,10 +281,10 @@ func (v *View) discardModal(c ui.C) {
 
 func (v *View) formPane(c ui.C) {
 	theme := c.Theme()
-	ui.Column(c).Grow(1).FillHeight().Pad(16).Gap(12).Background(theme.Card).Children(func() {
-		ui.Text(c, "Commit").FontSize(16).Bold()
+	ui.Column(c).FillWidth().Pad(12).Gap(8).Background(theme.Background).Children(func() {
+		ui.Text(c, "Commit").FontSize(13).Bold()
 		v.syncAmend()
-		ui.TextArea(c, &v.Message, "Commit message", "Describe the change").Height(140)
+		ui.TextArea(c, &v.Message, "Commit message", "Describe the change").Height(120)
 		if v.Error != "" {
 			ui.Text(c, v.Error).FontSize(12).Color(theme.Danger)
 		}

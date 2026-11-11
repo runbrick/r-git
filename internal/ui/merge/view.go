@@ -6,7 +6,9 @@ import (
 
 	textdiff "github.com/runbrick/r-git/internal/diff"
 	"github.com/runbrick/r-git/internal/git/ops"
+	"github.com/runbrick/r-git/internal/ui/controls"
 	diffview "github.com/runbrick/r-git/internal/ui/diff"
+	"github.com/runbrick/r-git/internal/ui/icons"
 	"github.com/vivaui/viva/ui"
 )
 
@@ -70,7 +72,7 @@ func (v *View) Page(c ui.C) {
 	ui.Column(c).Fill().Gap(8).Pad(12).Children(func() {
 		ui.Row(c).FillWidth().Gap(8).Items(ui.Center).Children(func() {
 			ui.Text(c, "Conflicts").Bold().Grow(1)
-			if v.OnClose != nil && ui.Button(c, "Close conflicts").Clicked() {
+			if v.OnClose != nil && controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), "Close conflicts").Clicked() {
 				c.After(v.OnClose)
 			}
 		})
@@ -78,7 +80,7 @@ func (v *View) Page(c ui.C) {
 			ui.Scroll(c).Width(200).FillHeight().Gap(4).Children(func() {
 				for _, conflict := range v.Conflicts {
 					item := conflict
-					if ui.Button(c.Key(item.Path), item.Path).Disabled(v.Busy).Clicked() && v.OnSelect != nil {
+					if ui.Button(c.Key(item.Path), item.Path).Ghost().Disabled(v.Busy).Clicked() && v.OnSelect != nil {
 						c.After(func() { v.OnSelect(item) })
 					}
 				}
@@ -123,26 +125,26 @@ func (v *View) Page(c ui.C) {
 						if chunk.Choice != textdiff.Unresolved {
 							ui.Text(c, "Accepted").Color(c.Theme().Success)
 						}
-						if ui.Button(c, fmt.Sprintf("Accept Yours %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
+						if controls.IconButton(c, icons.Pair(c, icons.Left, icons.Left_dark), fmt.Sprintf("Accept Yours %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
 							v.choose(i, textdiff.Left)
 						}
-						if ui.Button(c, fmt.Sprintf("Accept Theirs %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
+						if controls.IconButton(c, icons.Pair(c, icons.Right, icons.Right_dark), fmt.Sprintf("Accept Theirs %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
 							v.choose(i, textdiff.Right)
 						}
 					})
 				}).Label("Conflict chunks").FillWidth().Height(120).Shrink(0)
 				ui.Row(c).FillWidth().Gap(8).Children(func() {
-					if ui.Button(c, "Accept Yours").Disabled(v.Busy).Clicked() {
+					if ui.Button(c, "Accept Yours").Outline().Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Left
 						v.resultField.SetText(v.Result)
 						v.noteEdit()
 					}
-					if ui.Button(c, "Accept Theirs").Disabled(v.Busy).Clicked() {
+					if ui.Button(c, "Accept Theirs").Outline().Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Right
 						v.resultField.SetText(v.Result)
 						v.noteEdit()
 					}
-					if ui.Button(c, "Apply non-conflicting changes").Disabled(v.Busy || v.manual).Clicked() {
+					if ui.Button(c, "Apply non-conflicting changes").Outline().Disabled(v.Busy || v.manual).Clicked() {
 						v.Merge.ApplyNonConflicting()
 						v.Result = v.Merge.Result()
 						v.resultField.SetText(v.Result)
@@ -150,14 +152,14 @@ func (v *View) Page(c ui.C) {
 					}
 					if v.manual {
 						ui.Text(c, "Result edited manually").Muted()
-						if ui.Button(c, "Reset result to chunk choices").Disabled(v.Busy).Clicked() {
+						if ui.Button(c, "Reset result to chunk choices").Outline().Disabled(v.Busy).Clicked() {
 							v.manual = false
 							v.Result = v.Merge.Result()
 							v.resultField.SetText(v.Result)
 						}
 					}
 					ui.Spacer(c)
-					if ui.Button(c, "Mark resolved").Disabled(v.Busy || !v.manual && v.Merge.Remaining() > 0).Clicked() && v.OnResolve != nil {
+					if ui.Button(c, "Mark resolved").Outline().Disabled(v.Busy || !v.manual && v.Merge.Remaining() > 0).Clicked() && v.OnResolve != nil {
 						path, data := v.Path, []byte(v.Result)
 						c.After(func() { v.OnResolve(path, data) })
 					}

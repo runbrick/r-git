@@ -70,7 +70,7 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 				index := i
 				label := item.Ref + "  " + item.Message
 				ui.Row(c.Key(item.Ref)).FillWidth().Gap(8).Items(ui.Center).Children(func() {
-					button := ui.Button(c, label)
+					button := ui.Button(c, label).Ghost()
 					if p.Selected == index {
 						button.Bold()
 					}
@@ -98,7 +98,7 @@ func (p *StashPanel) Page(c ui.C) StashRequest {
 			}
 		})
 	}, func() {
-		if ui.Button(c, "Close stash").Clicked() {
+		if ui.Button(c, "Close stash").Outline().Clicked() {
 			p.Open = false
 		}
 		if ui.Button(c, "Save stash").Clicked() {
@@ -136,7 +136,7 @@ func (p *StashPanel) confirm(c ui.C, pending *StashRequest) {
 		ui.Modal(c, &p.confirmDrop, "Drop stash", func() {
 			ui.Text(c, "Drop "+ref+"? This cannot be undone.")
 		}, func() {
-			if ui.Button(c, "Cancel").Clicked() {
+			if ui.Button(c, "Cancel").Outline().Clicked() {
 				p.confirmDrop = false
 			}
 			if ui.Button(c, "Drop").Clicked() {
@@ -150,7 +150,7 @@ func (p *StashPanel) confirm(c ui.C, pending *StashRequest) {
 		ui.Modal(c, &p.confirmPop, "Pop stash", func() {
 			ui.Text(c, "Pop "+ref+"? The stash is removed if the apply succeeds.")
 		}, func() {
-			if ui.Button(c, "Cancel").Clicked() {
+			if ui.Button(c, "Cancel").Outline().Clicked() {
 				p.confirmPop = false
 			}
 			if ui.Button(c, "Pop now").Clicked() {
@@ -255,7 +255,7 @@ func (d *RemotesDialog) Page(c ui.C) {
 			}
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			d.Open = false
 		}
 		if ui.Button(c, "Save").Clicked() {

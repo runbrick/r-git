@@ -2,11 +2,14 @@ package log
 
 import (
 	"fmt"
+	"path"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/runbrick/r-git/internal/git/model"
 	"github.com/runbrick/r-git/internal/git/repo"
+	"github.com/runbrick/r-git/internal/ui/icons"
 	"github.com/vivaui/viva/gfx"
 	"github.com/vivaui/viva/ui"
 )
@@ -31,6 +34,13 @@ type View struct {
 	OnSelect     func(model.Hash)
 	OnGraphBuilt func()
 	OnShowDiff   func(model.Hash, string)
+	Toolbar      func(ui.C)
+	files        ui.TreeState
+	fileNodes    []fileNode
+	fileExpanded map[string]bool
+	fileC        ui.C
+	detailSource []model.FileChange
+	parentLabel  string
 
 	list             ui.ListState
 	visible          []int
@@ -94,6 +104,7 @@ func (v *View) SetError(err error) {
 // Select sets the selected commit after the first metadata page arrives.
 func (v *View) Select(hash model.Hash) {
 	v.selected = hash
+	v.cacheParents()
 	for i, commit := range v.Commits {
 		if commit.Hash.Equal(hash) {
 			v.list.Select(i)
@@ -105,6 +116,7 @@ func (v *View) Select(hash model.Hash) {
 // ResetBranch clears branch-scoped commit state while retaining reusable list storage.
 func (v *View) ResetBranch(branch string) {
 	v.Branch, v.Commits, v.Details = branch, nil, nil
+	v.detailSource, v.fileNodes = nil, nil
 	v.searchText = v.searchText[:0]
 	v.Graph, v.GraphIndex = nil, nil
 	v.Done, v.Loading, v.Error = false, true, ""
@@ -153,26 +165,29 @@ func (v *View) rebuildVisible() {
 func (v *View) Page(c ui.C) {
 	theme := c.Theme()
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).FillWidth().Pad(12).Gap(8).Items(ui.Center).Background(theme.Background).Children(func() {
-			oldFilter, oldBranch := v.Filter, v.Branch
-			search := ui.TextField(c, &v.Filter, "Filter", "Subject or hash")
-			search.Grow(1)
-			ui.Select(c, &v.Branch, v.Choices, nil).Label("Branch")
-			if oldFilter != v.Filter {
-				v.rebuildVisible()
-			}
-			if oldBranch != v.Branch && v.OnBranch != nil {
-				branch := v.Branch
-				c.After(func() { v.OnBranch(branch) })
-			}
-		})
 		ui.Row(c).Fill().Children(func() {
 			ui.Column(c).Grow(1).Fill().Children(func() {
+				ui.Row(c).FillWidth().PadX(8).PadY(4).Gap(8).Items(ui.Center).Background(theme.Background).Children(func() {
+					oldFilter, oldBranch := v.Filter, v.Branch
+					search := ui.TextField(c, &v.Filter, "Filter", "Subject or hash")
+					search.Width(240).Grow(1)
+					if v.Toolbar != nil {
+						v.Toolbar(c)
+					}
+					ui.Select(c, &v.Branch, v.Choices, nil).Label("Branch")
+					if oldFilter != v.Filter {
+						v.rebuildVisible()
+					}
+					if oldBranch != v.Branch && v.OnBranch != nil {
+						branch := v.Branch
+						c.After(func() { v.OnBranch(branch) })
+					}
+				})
 				v.list.RowWidth = 900
 				if v.list.Label == nil {
 					v.list.Label = v.rowLabel
 				}
-				ui.Row(c).FillWidth().PadX(12).PadY(6).Gap(12).Background(theme.Card).Children(func() {
+				ui.Row(c).FillWidth().PadX(12).PadY(4).Gap(12).Background(theme.Card).Children(func() {
 					ui.Text(c, "Graph").Width(44).FontSize(11).Muted()
 					ui.Text(c, "Subject").Grow(1).FontSize(11).Muted()
 					ui.Text(c, "Author").Width(140).FontSize(11).Muted()
@@ -184,12 +199,12 @@ func (v *View) Page(c ui.C) {
 					commit := v.Commits[index]
 					bg := theme.Background
 					if row.Selected() {
-						bg = theme.Accent
+						bg = theme.Selection
 					}
-					row.Element.FillWidth().Height(34).PadX(12).Gap(12).Items(ui.Center).Background(bg).DrawOver(func(d *ui.DrawContext) {
+					row.Element.FillWidth().Height(26).PadX(12).Gap(12).Items(ui.Center).Background(bg).DrawOver(func(d *ui.DrawContext) {
 						v.drawGraph(d, v.GraphIndex[commit.Hash])
 					}).Children(func() {
-						ui.Slot(row.C).Width(44).Height(28)
+						ui.Slot(row.C).Width(44).Height(24)
 						ui.Column(row.C).Grow(1).Gap(2).Children(func() {
 							ui.Row(row.C).Gap(6).Items(ui.Center).Children(func() {
 								for _, label := range v.Refs[commit.Hash] {
@@ -207,6 +222,7 @@ func (v *View) Page(c ui.C) {
 					hash := v.Commits[v.visible[selected]].Hash
 					if !hash.Equal(v.selected) {
 						v.selected = hash
+						v.cacheParents()
 						if v.OnSelect != nil {
 							v.OnSelect(hash)
 						}
@@ -218,7 +234,7 @@ func (v *View) Page(c ui.C) {
 					v.Loading = true
 					v.OnPage(branch, skip)
 				}
-				ui.Row(c).FillWidth().PadX(12).PadY(5).Gap(8).Items(ui.Center).Children(func() {
+				ui.Row(c).FillWidth().PadX(12).PadY(4).Gap(8).Items(ui.Center).Children(func() {
 					ui.Text(c, fmt.Sprintf("%d commits", len(v.Commits))).FontSize(11).Muted()
 					if v.Loading {
 						ui.Text(c, "Loading...").FontSize(11).Muted()
@@ -241,41 +257,143 @@ func (v *View) rowLabel(row int) string {
 	return v.Commits[v.visible[row]].Subject
 }
 
+// SetDetails installs changed files and builds the tree only when data arrives.
+func (v *View) SetDetails(files []model.FileChange) {
+	v.Details = files
+	v.detailSource = files
+	v.fileExpanded = make(map[string]bool)
+	v.rebuildFiles()
+}
+
+type fileNode struct {
+	name, path, label string
+	countLabel        string
+	depth             int
+	folder            bool
+	expanded          bool
+}
+
+func (v *View) rebuildFiles() {
+	v.fileNodes = v.fileNodes[:0]
+	files := append([]model.FileChange(nil), v.Details...)
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	v.appendFiles(files, "", 0)
+}
+
+func (v *View) appendFiles(files []model.FileChange, prefix string, depth int) {
+	groups := make(map[string][]model.FileChange)
+	var dirs []string
+	var leaves []model.FileChange
+	for _, file := range files {
+		rel := strings.TrimPrefix(file.Path, prefix)
+		dir, _, nested := strings.Cut(rel, "/")
+		if !nested {
+			leaves = append(leaves, file)
+			continue
+		}
+		if _, ok := groups[dir]; !ok {
+			dirs = append(dirs, dir)
+		}
+		groups[dir] = append(groups[dir], file)
+	}
+	sort.Strings(dirs)
+	for _, dir := range dirs {
+		full := prefix + dir + "/"
+		expanded, known := v.fileExpanded[full]
+		if !known {
+			expanded = true
+		}
+		v.fileNodes = append(v.fileNodes, fileNode{name: dir, path: full, label: dir, depth: depth, countLabel: fileCount(len(groups[dir])), folder: true, expanded: expanded})
+		if expanded {
+			v.appendFiles(groups[dir], full, depth+1)
+		}
+	}
+	for _, file := range leaves {
+		label := file.Status.String() + "  " + file.Path
+		if file.OrigPath != "" {
+			label += "  <- " + file.OrigPath
+		}
+		v.fileNodes = append(v.fileNodes, fileNode{name: path.Base(file.Path), path: file.Path, label: label, depth: depth})
+	}
+}
+
+func (v *View) fileNodeAt(i int) ui.TreeNode {
+	n := v.fileNodes[i]
+	return ui.TreeNode{Depth: n.depth, Branch: n.folder, Expanded: n.expanded}
+}
+func (v *View) fileLabel(i int) string { return v.fileNodes[i].label }
+func (v *View) fileContent(i int) {
+	n, c := v.fileNodes[i], v.fileC
+	if n.folder {
+		ui.Icon(c, icons.Pair(c, icons.Folder, icons.Folder_dark)).Size(16, 16)
+		ui.Text(c, n.name).FontSize(13)
+		ui.Text(c, n.countLabel).FontSize(12).Muted()
+	} else {
+		ui.Icon(c, icons.File(c, n.path)).Size(16, 16)
+		ui.Text(c, n.name).FontSize(13)
+	}
+}
+
+func fileCount(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
+}
+
+func (v *View) cacheParents() {
+	v.parentLabel = ""
+	if commit, ok := v.selectedCommit(); ok {
+		for i, parent := range commit.Parents {
+			if i > 0 {
+				v.parentLabel += "  "
+			}
+			v.parentLabel += parent.Short()
+		}
+	}
+}
+
 func (v *View) detailPane(c ui.C) {
 	theme := c.Theme()
-	ui.Column(c).Width(320).FillHeight().Pad(16).Gap(10).Background(theme.Card).Children(func() {
-		commit, ok := v.selectedCommit()
-		if !ok {
-			ui.Text(c, "Select a commit").Muted()
-			return
+	// Retain compatibility with callers assigning Details directly. The source
+	// slice changes on publication; expanding a folder also rebuilds explicitly.
+	if len(v.detailSource) != len(v.Details) || (len(v.Details) > 0 && &v.detailSource[0] != &v.Details[0]) {
+		v.SetDetails(v.Details)
+	}
+	if v.files.Node == nil {
+		v.files.Node, v.files.RowHeight = v.fileNodeAt, 22
+	}
+	v.fileC = c
+	ui.Column(c).Width(300).FillHeight().Background(theme.Background).Children(func() {
+		ui.Row(c).FillWidth().Height(32).PadX(12).Gap(8).Items(ui.Center).Children(func() {
+			ui.Text(c, "Changed files").FontSize(12).Muted()
+			ui.Text(c, fileCount(len(v.Details))).FontSize(12).Muted()
+		})
+		ui.Tree(c, &v.files, len(v.fileNodes), v.fileLabel, v.fileContent).Grow(1)
+		if i, ok := v.files.Toggled(); ok && i < len(v.fileNodes) {
+			n := v.fileNodes[i]
+			v.fileExpanded[n.path] = !n.expanded
+			v.rebuildFiles()
 		}
-		ui.Text(c, commit.Subject).FontSize(15).Bold()
-		ui.Text(c, commit.Message).FontSize(12)
+		if i, ok := v.files.Chosen(); ok && i < len(v.fileNodes) && !v.fileNodes[i].folder && v.OnShowDiff != nil {
+			hash, file := v.selected, v.fileNodes[i].path
+			c.After(func() { v.OnShowDiff(hash, file) })
+		}
 		ui.Divider(c)
-		ui.Text(c, "Author").FontSize(11).Muted()
-		ui.Text(c, fmt.Sprintf("%s <%s>", commit.Author.Name, commit.Author.Email)).FontSize(12)
-		ui.Text(c, "Committer").FontSize(11).Muted()
-		ui.Text(c, fmt.Sprintf("%s <%s>", commit.Committer.Name, commit.Committer.Email)).FontSize(12)
-		ui.Text(c, "Parents").FontSize(11).Muted()
-		parents := make([]string, len(commit.Parents))
-		for i, parent := range commit.Parents {
-			parents[i] = parent.Short()
-		}
-		ui.Text(c, strings.Join(parents, "  ")).FontSize(12).Mono()
-		ui.Text(c, "Changed files").FontSize(11).Muted()
-		ui.Scroll(c).Grow(1).Gap(4).Children(func() {
-			for _, change := range v.Details {
-				label := change.Status.String() + "  " + change.Path
-				if change.OrigPath != "" {
-					label += "  <- " + change.OrigPath
-				}
-				if v.OnShowDiff == nil {
-					ui.Text(c, label).FontSize(12).Mono()
-				} else if ui.Button(c.Key(change.Path), label).Clicked() {
-					hash, path := commit.Hash, change.Path
-					c.After(func() { v.OnShowDiff(hash, path) })
-				}
+		ui.Scroll(c).FillWidth().Height(280).Pad(12).Gap(8).Children(func() {
+			commit, ok := v.selectedCommit()
+			if !ok {
+				ui.Text(c, "Select a commit").Muted()
+				return
 			}
+			ui.Text(c, commit.Subject).FontSize(13).Bold()
+			ui.Text(c, commit.Message).FontSize(12)
+			ui.Text(c, "Author").FontSize(12).Muted()
+			ui.Text(c, fmt.Sprintf("%s <%s>", commit.Author.Name, commit.Author.Email)).FontSize(12)
+			ui.Text(c, "Committer").FontSize(12).Muted()
+			ui.Text(c, fmt.Sprintf("%s <%s>", commit.Committer.Name, commit.Committer.Email)).FontSize(12)
+			ui.Text(c, "Parents").FontSize(12).Muted()
+			ui.Text(c, v.parentLabel).FontSize(12).Mono()
 		})
 	})
 }

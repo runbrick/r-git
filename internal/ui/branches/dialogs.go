@@ -44,7 +44,7 @@ func (d *CheckoutDialog) Page(c ui.C) {
 			ui.Text(c, "Stash the changes and check out "+d.Branch+"?")
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			d.Open = false
 			d.Cancelled = true
 		}
@@ -90,7 +90,7 @@ func (d *NewBranchDialog) Page(c ui.C) {
 			}
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			d.Open = false
 		}
 		if ui.Button(c, "Create branch").Clicked() {
@@ -132,7 +132,7 @@ func (d *RenameDialog) Page(c ui.C) {
 	ui.Modal(c, &d.Open, "Rename "+d.Old, func() {
 		ui.TextField(c, &d.Name, "New name", "")
 	}, func() {
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			d.Open = false
 		}
 		if ui.Button(c, "Rename").Clicked() && strings.TrimSpace(d.Name) != "" {
@@ -185,7 +185,7 @@ func (d *DeleteDialog) Page(c ui.C) {
 			ui.Text(c, fmt.Sprintf("%d unmerged commits. Delete anyway?", len(d.Unmerged.Commits))).FontSize(12).Muted()
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			d.Open = false
 		}
 		label := "Delete"
@@ -267,7 +267,7 @@ func (d *PushDialog) Page(c ui.C) {
 		})
 	}, func() {
 		if d.ShowResults {
-			if ui.Button(c, "Close").Clicked() {
+			if ui.Button(c, "Close").Outline().Clicked() {
 				d.Open = false
 			}
 			if RejectedNonFF(d.Results) && ui.Button(c, "Pull then push").Clicked() {
@@ -276,7 +276,7 @@ func (d *PushDialog) Page(c ui.C) {
 			}
 			return
 		}
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			d.Open = false
 		}
 		if ui.Button(c, "Push commits").Clicked() {
@@ -408,7 +408,7 @@ func (d *PullDialog) Page(c ui.C) {
 			}
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Clicked() {
+		if ui.Button(c, "Cancel").Outline().Clicked() {
 			d.Open = false
 		}
 		if ui.Button(c, "Pull now").Clicked() {

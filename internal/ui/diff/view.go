@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 
 	textdiff "github.com/runbrick/r-git/internal/diff"
+	"github.com/runbrick/r-git/internal/ui/controls"
+	"github.com/runbrick/r-git/internal/ui/icons"
 	"github.com/vivaui/viva/gfx"
 	"github.com/vivaui/viva/ui"
 )
@@ -202,10 +204,10 @@ func (v *View) Page(c ui.C) {
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).FillWidth().Pad(8).Gap(8).Items(ui.Center).Children(func() {
 			ui.Text(c, v.Title).Bold().Grow(1)
-			if ui.Button(c, "Previous change").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Up, icons.Up_dark), "Previous change").Clicked() {
 				v.Previous()
 			}
-			if ui.Button(c, "Next change").Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Down, icons.Down_dark), "Next change").Clicked() {
 				v.Next()
 			}
 			ui.Text(c, v.status).Muted()
@@ -225,7 +227,7 @@ func (v *View) Page(c ui.C) {
 				}
 				v.SetContent(v.Title, strings.Join(v.Result.A, "\n"), strings.Join(v.Result.B, "\n"))
 			}
-			if v.OnClose != nil && ui.Button(c, "Close diff").Clicked() {
+			if v.OnClose != nil && controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), "Close diff").Clicked() {
 				c.After(v.OnClose)
 			}
 		})
