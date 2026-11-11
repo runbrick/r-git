@@ -2,6 +2,7 @@ package branches
 
 import (
 	"context"
+	"github.com/runbrick/r-git/internal/i18n"
 	"sync"
 
 	"github.com/runbrick/r-git/internal/git/ops"
@@ -27,6 +28,9 @@ type credentialAnswer struct {
 // shown in turn. The modal's open flag is UI-thread state. Askpass code
 // only enqueues and removes under mu, then asks the window to repaint.
 type CredentialsDialog struct {
+	titleText i18n.NameText
+
+	i18n.Locale
 	mu      sync.Mutex
 	queue   []*credentialPrompt
 	invalid *viva.Invalidator
@@ -120,27 +124,27 @@ func (d *CredentialsDialog) Page(c ui.C) {
 	}
 
 	prompt := d.current
-	title := "Git credentials"
+	title := d.Text().GitCredentials
 	if prompt.req.URL != "" {
-		title = "Git credentials for " + prompt.req.URL
+		title = d.titleText.Get(d.Text(), prompt.req.URL, d.Text().CredentialsTitle)
 	}
 	var response *credentialAnswer
-	ui.Modal(c, &d.open, title, func() {
+	ui.ModalWith(c, &d.open, title, ui.ModalSpec{NoClose: d.Text() != &i18n.En}, func() {
 		ui.Column(c).Gap(8).FillWidth().Children(func() {
 			if prompt.req.Prompt != "" {
 				ui.Text(c, prompt.req.Prompt).FontSize(12).Muted()
 			}
 			if prompt.req.Kind != ops.CredentialKindPassword {
-				ui.TextField(c, &d.username, "Username", "").AutoFocus()
+				ui.TextField(c, &d.username, d.Text().Username, "").AutoFocus()
 			}
-			ui.TextField(c, &d.password, "Password", "").Secure()
+			ui.TextField(c, &d.password, d.Text().Password, "").Secure()
 		})
 	}, func() {
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, d.Text().Cancel).Outline().Clicked() {
 			response = &credentialAnswer{}
 			d.open = false
 		}
-		if ui.Button(c, "OK").Clicked() {
+		if ui.Button(c, d.Text().OK).Clicked() {
 			response = &credentialAnswer{cred: ops.Credential{Username: d.username, Password: d.password}, ok: true}
 			d.open = false
 		}

@@ -275,7 +275,7 @@ func waitFor(t *testing.T, driver *viva.Driver, condition func() bool) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("timed out waiting for Viva wake result")
+	t.Fatalf("timed out waiting for Viva wake result; labels=%v", labelValues(driver))
 }
 
 func hasLabel(driver *viva.Driver, value string) bool {

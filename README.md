@@ -6,6 +6,8 @@ Viva is pinned to `v0.5.2-0.20261109155928-8b39edf779f6` because the page API us
 
 Work in progress. The port is split into small pull requests, one per module.
 
+The interface defaults to Simplified Chinese (简体中文). Choose English in Settings > Language to change it without restarting; each choice is saved. For tests and automation, `R_GIT_LANG=en` or `R_GIT_LANG=zh-CN` selects the language for that process without changing the saved preference.
+
 ## Build
 
 Build the application with:

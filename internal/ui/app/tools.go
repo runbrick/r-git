@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
+	"github.com/runbrick/r-git/internal/i18n"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,7 +86,7 @@ func (m *Model) toolsPage(c ui.C) bool {
 		ui.Text(c, m.tools.err).Color(c.Theme().Danger).Pad(8)
 	}
 	if m.tools.busy {
-		ui.Text(c, "Running Git…").Muted().Pad(8)
+		ui.Text(c, m.Text().RunningGit).Muted().Pad(8)
 		// A spinner asks for the next frame. Headless WaitFor delivers that
 		// frame through OnWake. A cross-thread Invalidate during WaitFor does
 		// not paint on Linux.
@@ -94,14 +94,14 @@ func (m *Model) toolsPage(c ui.C) bool {
 	}
 	if m.repo != nil && m.repo.State == model.StateRebasing {
 		ui.Row(c).FillWidth().Pad(8).Gap(8).Children(func() {
-			ui.Text(c, "Rebase in progress").Grow(1)
-			if controls.IconButton(c, icons.Pair(c, icons.Right, icons.Right_dark), "Continue rebase").Disabled(m.tools.busy).Clicked() {
+			ui.Text(c, m.Text().RebaseInProgress).Grow(1)
+			if controls.IconButton(c, icons.Pair(c, icons.Right, icons.Right_dark), m.Text().ContinueRebase).Disabled(m.tools.busy).Clicked() {
 				c.After(func() { m.controlRebase("continue") })
 			}
-			if controls.IconButton(c, icons.Pair(c, icons.Down, icons.Down_dark), "Skip commit").Disabled(m.tools.busy).Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Down, icons.Down_dark), m.Text().SkipCommit).Disabled(m.tools.busy).Clicked() {
 				c.After(func() { m.controlRebase("skip") })
 			}
-			if controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), "Abort rebase").Disabled(m.tools.busy).Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Close, icons.Close_dark), m.Text().AbortRebase).Disabled(m.tools.busy).Clicked() {
 				c.After(func() { m.controlRebase("abort") })
 			}
 		})
@@ -157,7 +157,7 @@ func (m *Model) ShowDiff(hash model.Hash, path string) {
 
 func readDiff(ctx context.Context, r *repo.Repo, hash model.Hash, path string) (string, string, error) {
 	if path == "" || filepath.IsAbs(path) || filepath.Clean(path) == ".." || strings.HasPrefix(filepath.Clean(path), ".."+string(filepath.Separator)) {
-		return "", "", errors.New("invalid diff path")
+		return "", "", i18n.ErrInvalidDiffPath
 	}
 	read := func(rev, path string) (string, error) {
 		res, err := r.Executor.Run(ctx, command.Cmd{Dir: r.Path, Subcommand: "ls-tree", Args: []string{"--name-only", "-z", rev, "--", path}})
@@ -208,7 +208,7 @@ func readDiff(ctx context.Context, r *repo.Repo, hash model.Hash, path string) (
 		}
 	}
 	if err == nil && (!utf8.ValidString(a) || !utf8.ValidString(b) || strings.ContainsRune(a, 0) || strings.ContainsRune(b, 0)) {
-		err = errors.New("binary file: text diff is unavailable")
+		err = i18n.ErrBinaryDiff
 	}
 	return a, b, err
 }
@@ -249,7 +249,7 @@ func (m *Model) resolveConflict(path string, data []byte) {
 	m.tools.busy = false
 	m.tools.merge.Busy = false
 	if err != nil {
-		m.tools.merge.Error = err.Error()
+		m.tools.merge.Error = m.Text().Error(err)
 		m.log.SetError(err)
 		return
 	}
@@ -259,7 +259,7 @@ func (m *Model) resolveConflict(path string, data []byte) {
 	if len(conflicts) > 0 {
 		content, readErr := o.ConflictContent(ctx, conflicts[0])
 		if readErr != nil {
-			m.tools.merge.Error = readErr.Error()
+			m.tools.merge.Error = m.Text().Error(readErr)
 			return
 		}
 		m.tools.merge.SetFile(conflicts[0].Path, content)
@@ -289,10 +289,10 @@ func (m *Model) applyWorkflow(out *workflowResult) {
 	m.tools.merge.Busy = false
 	m.tools.rebase.Busy = false
 	if out.err != nil {
-		m.tools.err = out.err.Error()
+		m.tools.err = m.Text().Error(out.err)
 		m.log.SetError(out.err)
-		m.tools.merge.Error = out.err.Error()
-		m.tools.rebase.Error = out.err.Error()
+		m.tools.merge.Error = m.Text().Error(out.err)
+		m.tools.rebase.Error = m.Text().Error(out.err)
 		return
 	}
 	switch out.kind {
@@ -314,7 +314,7 @@ func (m *Model) applyWorkflow(out *workflowResult) {
 			content, err := ops.New(m.repo.Executor, m.repo.Path).ConflictContent(context.Background(), first)
 			m.tools.merge.Busy = false
 			if err != nil {
-				m.tools.merge.Error = err.Error()
+				m.tools.merge.Error = m.Text().Error(err)
 				break
 			}
 			m.tools.merge.SetFile(first.Path, content)
@@ -332,7 +332,7 @@ func (m *Model) applyWorkflow(out *workflowResult) {
 	case workflowTodo:
 		m.tools.rebase.SetEntries(out.path, out.entries)
 	case workflowRebased:
-		m.tools.rebase.Status = fmt.Sprintf("Rebase: %v", out.rebase.Outcome)
+		m.tools.rebase.Status = m.Text().RebaseDone
 		switch out.rebase.Outcome {
 		case ops.OutcomeDone, ops.OutcomeNothingToDo:
 			m.tools.rebase.Open = false
@@ -345,8 +345,8 @@ func (m *Model) applyWorkflow(out *workflowResult) {
 		case ops.OutcomeStopped:
 			m.repo.State = model.StateRebasing
 			m.tools.rebase.Open = false
-			m.tools.err = "Rebase stopped for edit; amend the commit, then continue the rebase."
-			m.tools.rebase.Status = "Rebase stopped for edit; amend the commit, then continue the rebase."
+			m.tools.err = m.Text().RebaseStoppedForEditAmendTheCommitThenContinueTheRebase
+			m.tools.rebase.Status = m.Text().RebaseStoppedForEditAmendTheCommitThenContinueTheRebase
 		}
 	}
 }

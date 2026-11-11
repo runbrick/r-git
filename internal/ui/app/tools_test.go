@@ -17,6 +17,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	os.Setenv("R_GIT_LANG", "en")
 	if handled, exitCode := ops.RunEditorIfRequested(); handled {
 		os.Exit(exitCode)
 	}

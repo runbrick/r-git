@@ -3,6 +3,7 @@
 package commit
 
 import (
+	"github.com/runbrick/r-git/internal/i18n"
 	"path"
 	"sort"
 	"strings"
@@ -25,16 +26,18 @@ const (
 
 // Node is one visible row. Children of a collapsed branch are omitted.
 type Node struct {
-	Count    int
-	Kind     NodeKind
-	Group    repo.ChangeGroup
-	Depth    int
-	Label    string
-	Path     string
-	Status   model.FileStatus
-	Included bool
-	Branch   bool
-	Expanded bool
+	countText   i18n.NumberText
+	includeText i18n.NameText
+	Count       int
+	Kind        NodeKind
+	Group       repo.ChangeGroup
+	Depth       int
+	Label       string
+	Path        string
+	Status      model.FileStatus
+	Included    bool
+	Branch      bool
+	Expanded    bool
 }
 
 // Request is one action the panel asks the shell to run. The view does
@@ -64,6 +67,8 @@ const (
 
 // View is the changes tree and the commit form.
 type View struct {
+	discardText i18n.NameText
+	i18n.Locale
 	Entries     []repo.ChangeEntry
 	Busy        bool
 	Error       string
@@ -157,7 +162,7 @@ func (v *View) Page(c ui.C) {
 	}
 	v.rowC = c
 	ui.Column(c).Fill().Children(func() {
-		ui.Row(c).Height(32).FillWidth().PadX(12).Items(ui.Center).Border(1, c.Theme().Border).Children(func() { ui.Text(c, "Commit").FontSize(13) })
+		ui.Row(c).Height(32).FillWidth().PadX(12).Items(ui.Center).Border(1, c.Theme().Border).Children(func() { ui.Text(c, v.Text().Commit).FontSize(13) })
 		v.treePane(c)
 		ui.Divider(c)
 		v.formPane(c)
@@ -170,27 +175,27 @@ func (v *View) treePane(c ui.C) {
 	theme := c.Theme()
 	ui.Column(c).FillWidth().Grow(1).Children(func() {
 		ui.Row(c).FillWidth().Height(36).PadX(8).Gap(4).Items(ui.Center).Background(theme.Background).Children(func() {
-			if controls.IconButton(c, icons.Pair(c, icons.Refresh, icons.Refresh_dark), "Refresh changes").Disabled(v.OnRefresh == nil || v.Busy).Clicked() {
+			if controls.IconButton(c, icons.Pair(c, icons.Refresh, icons.Refresh_dark), v.Text().RefreshChanges).Disabled(v.OnRefresh == nil || v.Busy).Clicked() {
 				c.After(v.OnRefresh)
 			}
 			if node, ok := v.actionNode(); ok {
 				v.rowActions(c, node)
 			}
 			ui.Spacer(c)
-			options := controls.IconButton(c, icons.Pair(c, icons.More, icons.More_dark), "Commit options")
+			options := controls.IconButton(c, icons.Pair(c, icons.More, icons.More_dark), v.Text().CommitOptions)
 			if options.Clicked() {
 				v.optionsOpen = !v.optionsOpen
 			}
 			ui.Popover(c, options, &v.optionsOpen, func() {
 				ui.Column(c).Width(250).Pad(8).Gap(8).Children(func() {
-					ui.Checkbox(c, &v.SignOff, "Sign-off")
-					ui.TextField(c, &v.Author, "Author", "Name <email>")
+					ui.Checkbox(c, &v.SignOff, v.Text().SignOff)
+					ui.TextField(c, &v.Author, v.Text().Author, v.Text().NameEmail)
 				})
 			})
 		})
 		if len(v.nodes) == 0 {
 			ui.Column(c).Fill().Pad(16).Children(func() {
-				ui.Text(c, "No changes").Muted()
+				ui.Text(c, v.Text().NoChanges).Muted()
 			})
 			return
 		}
@@ -218,7 +223,7 @@ func (v *View) rowContent(i int) {
 	switch node.Kind {
 	case NodeGroup, NodeDir:
 		on := node.Included
-		if ui.Checkbox(c.Key(branchKey(node)), &on, "").Label("Include " + node.Label).Changed() {
+		if ui.Checkbox(c.Key(branchKey(node)), &on, "").Label(v.nodes[i].includeText.Get(v.Text(), node.Label, v.Text().IncludePath)).Changed() {
 			for _, entry := range v.Entries {
 				if entry.Group == node.Group && (node.Kind == NodeGroup || strings.HasPrefix(entry.Path, node.Path+"/")) {
 					v.included[includeKey(entry.Group, entry.Path)] = on
@@ -233,10 +238,10 @@ func (v *View) rowContent(i int) {
 		if node.Kind == NodeGroup {
 			text.Bold()
 		}
-		ui.Text(c, countLabel(node.Count)).FontSize(12).Muted()
+		ui.Text(c, v.nodes[i].countText.Get(v.Text(), node.Count, v.Text().FilesCount)).FontSize(12).Muted()
 	default:
 		on := node.Included
-		if ui.Checkbox(c.Key(includeKey(node.Group, node.Path)), &on, "").Label("Include " + node.Path).Changed() {
+		if ui.Checkbox(c.Key(includeKey(node.Group, node.Path)), &on, "").Label(v.nodes[i].includeText.Get(v.Text(), node.Path, v.Text().IncludePath)).Changed() {
 			v.included[includeKey(node.Group, node.Path)] = on
 			c.After(v.rebuild)
 		}
@@ -265,20 +270,20 @@ func (v *View) actionNode() (Node, bool) {
 
 func (v *View) rowActions(c ui.C, node Node) {
 	if node.Group != repo.GroupStaged && node.Group != repo.GroupConflicts {
-		if controls.IconButton(c.Key(node.Path+"-stage"), icons.Pair(c, icons.Add, icons.Add_dark), "Stage").Clicked() {
+		if controls.IconButton(c.Key(node.Path+"-stage"), icons.Pair(c, icons.Add, icons.Add_dark), v.Text().Stage).Clicked() {
 			v.emit(Request{Kind: RequestStage, Paths: []string{node.Path}})
 		}
 	}
 	if node.Group == repo.GroupStaged {
-		if controls.IconButton(c.Key(node.Path+"-unstage"), icons.Pair(c, icons.Remove, icons.Remove_dark), "Unstage").Clicked() {
+		if controls.IconButton(c.Key(node.Path+"-unstage"), icons.Pair(c, icons.Remove, icons.Remove_dark), v.Text().Unstage).Clicked() {
 			v.emit(Request{Kind: RequestUnstage, Paths: []string{node.Path}})
 		}
 	}
-	if controls.IconButton(c.Key(node.Path+"-rollback"), icons.Pair(c, icons.Rollback, icons.Rollback_dark), "Rollback").Clicked() {
+	if controls.IconButton(c.Key(node.Path+"-rollback"), icons.Pair(c, icons.Rollback, icons.Rollback_dark), v.Text().Rollback).Clicked() {
 		v.discardPath = node.Path
 		v.discardOpen = true
 	}
-	if controls.IconButton(c.Key(node.Path+"-diff"), icons.Pair(c, icons.Diff, icons.Diff_dark), "Diff").Clicked() {
+	if controls.IconButton(c.Key(node.Path+"-diff"), icons.Pair(c, icons.Diff, icons.Diff_dark), v.Text().Diff).Clicked() {
 		if v.OnShowDiff != nil {
 			v.OnShowDiff(model.Hash{}, node.Path)
 		}
@@ -289,20 +294,20 @@ func (v *View) rowActions(c ui.C, node Node) {
 func (v *View) menuFor(menu *ui.MenuItems, node Node) {
 	v.menuPath = node.Path
 	if node.Group != repo.GroupStaged && node.Group != repo.GroupConflicts {
-		if menu.Item("Stage").Clicked() {
+		if menu.Item(v.Text().Stage).Clicked() {
 			v.emit(Request{Kind: RequestStage, Paths: []string{node.Path}})
 		}
 	}
 	if node.Group == repo.GroupStaged {
-		if menu.Item("Unstage").Clicked() {
+		if menu.Item(v.Text().Unstage).Clicked() {
 			v.emit(Request{Kind: RequestUnstage, Paths: []string{node.Path}})
 		}
 	}
-	if menu.Item("Rollback").Clicked() {
+	if menu.Item(v.Text().Rollback).Clicked() {
 		v.discardPath = node.Path
 		v.discardOpen = true
 	}
-	if menu.Item("Show diff").Clicked() {
+	if menu.Item(v.Text().ShowDiff).Clicked() {
 		if v.OnShowDiff != nil {
 			v.OnShowDiff(model.Hash{}, node.Path)
 		}
@@ -311,13 +316,13 @@ func (v *View) menuFor(menu *ui.MenuItems, node Node) {
 }
 
 func (v *View) discardModal(c ui.C) {
-	ui.Modal(c, &v.discardOpen, "Rollback changes", func() {
-		ui.Text(c, "Discard uncommitted changes to "+v.discardPath+"? This cannot be undone.")
+	ui.ModalWith(c, &v.discardOpen, v.Text().RollbackChanges, ui.ModalSpec{NoClose: v.Text() != &i18n.En}, func() {
+		ui.Text(c, v.discardText.Get(v.Text(), v.discardPath, v.Text().DiscardPrompt))
 	}, func() {
-		if ui.Button(c, "Cancel").Outline().Clicked() {
+		if ui.Button(c, v.Text().Cancel).Outline().Clicked() {
 			v.discardOpen = false
 		}
-		if ui.Button(c, "Discard").Clicked() {
+		if ui.Button(c, v.Text().Discard).Clicked() {
 			file := v.discardPath
 			v.discardOpen = false
 			v.emit(Request{Kind: RequestDiscard, Paths: []string{file}})
@@ -329,28 +334,28 @@ func (v *View) formPane(c ui.C) {
 	theme := c.Theme()
 	ui.Column(c).FillWidth().Height(320).Pad(12).Gap(8).Background(theme.Background).Children(func() {
 		ui.Row(c).FillWidth().Gap(4).Items(ui.Center).Children(func() {
-			ui.Checkbox(c, &v.Amend, "Amend")
-			last := ui.ButtonBase(c, "last commit").Height(28).PadX(4).Gap(4).Tooltip("Amend last commit").Children(func() {
-				ui.Text(c, "last commit").FontSize(13).Color(theme.Primary)
+			ui.Checkbox(c, &v.Amend, v.Text().Amend)
+			last := ui.ButtonBase(c, v.Text().LastCommit).Height(28).PadX(4).Gap(4).Tooltip(v.Text().AmendLastCommit).Children(func() {
+				ui.Text(c, v.Text().LastCommit).FontSize(13).Color(theme.Primary)
 				ui.Icon(c, icons.Pair(c, icons.Down, icons.Down_dark)).Size(16, 16)
 			})
 			if last.Clicked() {
 				v.amendMenu = !v.amendMenu
 			}
 			ui.Menu(c, last, &v.amendMenu, func(menu *ui.MenuItems) {
-				if menu.Item("Amend last commit").Clicked() {
+				if menu.Item(v.Text().AmendLastCommit).Clicked() {
 					v.Amend = true
 				}
 			})
 		})
 		v.syncAmend()
-		ui.TextArea(c, &v.Message, "Commit message", "Describe the change").Mono().FontSize(13).Grow(1).FillWidth()
+		ui.TextArea(c, &v.Message, v.Text().CommitMessage, v.Text().DescribeTheChange).Mono().FontSize(13).Grow(1).FillWidth()
 		if v.Error != "" {
 			ui.Text(c, v.Error).FontSize(12).Color(theme.Danger)
 		}
 		ui.Row(c).FillWidth().Gap(6).Children(func() {
-			commit := controls.TextButton(c, "Commit changes", "Commit").Disabled(v.Busy)
-			push := controls.TextButton(c, "Commit and Push", "Commit and Push...").Disabled(v.Busy)
+			commit := controls.TextButton(c, v.Text().CommitChanges, v.Text().Commit).Disabled(v.Busy)
+			push := controls.TextButton(c, v.Text().CommitAndPush, v.Text().CommitAndPushEllipsis).Disabled(v.Busy)
 			if commit.Clicked() {
 				v.submit(false)
 			}
@@ -369,7 +374,7 @@ func (v *View) submit(push bool) {
 		return
 	}
 	if strings.TrimSpace(v.Message) == "" {
-		v.Error = "Enter a commit message."
+		v.Error = v.Text().EnterACommitMessage
 		return
 	}
 	v.Error = ""
@@ -477,7 +482,7 @@ func (v *View) rebuild() {
 			continue
 		}
 		sort.Slice(files, func(a, b int) bool { return files[a].Path < files[b].Path })
-		groupNode := Node{Kind: NodeGroup, Group: group, Label: groupLabel(group), Count: len(files), Included: v.allIncluded(group, files), Branch: true, Path: group.String()}
+		groupNode := Node{Kind: NodeGroup, Group: group, Label: v.groupLabel(group), Count: len(files), Included: v.allIncluded(group, files), Branch: true, Path: group.String()}
 		groupNode.Expanded = v.isOpen(groupNode)
 		v.nodes = append(v.nodes, groupNode)
 		if !groupNode.Expanded {
@@ -605,12 +610,16 @@ func statusColor(theme *ui.Theme, status model.FileStatus) *ui.Color {
 	}
 }
 
-func groupLabel(group repo.ChangeGroup) string {
+func (v *View) groupLabel(group repo.ChangeGroup) string {
 	switch group {
 	case repo.GroupUnstaged:
-		return "Changes"
+		return v.Text().Changes
 	case repo.GroupUnversioned:
-		return "Unversioned Files"
+		return v.Text().UnversionedFiles
+	case repo.GroupStaged:
+		return v.Text().Staged
+	case repo.GroupConflicts:
+		return v.Text().Conflicts
 	default:
 		return group.String()
 	}
@@ -623,3 +632,6 @@ func (v *View) allIncluded(group repo.ChangeGroup, files []repo.ChangeEntry) boo
 	}
 	return len(files) > 0
 }
+
+// SetMessages refreshes translated group rows while retaining inclusion state.
+func (v *View) SetMessages(messages *i18n.Messages) { v.UseMessages(messages); v.rebuild() }

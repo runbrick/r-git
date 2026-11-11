@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/runbrick/r-git/internal/i18n"
 	"strings"
 
 	"github.com/runbrick/r-git/internal/git/ops"
@@ -14,7 +15,7 @@ import (
 )
 
 var errPreview = errors.New("rebase preview captured")
-var ErrHistoryChanged = errors.New("rebase history changed; load the commits again")
+var ErrHistoryChanged = i18n.ErrHistoryChanged
 
 // Prepare asks Git for the real todo and cancels in the editor, before changes.
 func Prepare(ctx context.Context, o *ops.Service, upstream string) ([]ops.RebaseEntry, error) {
@@ -29,7 +30,7 @@ func Prepare(ctx context.Context, o *ops.Service, upstream string) ([]ops.Rebase
 	if r.Err != nil {
 		return nil, r.Err
 	}
-	return nil, errors.New("no commits to rebase")
+	return nil, i18n.ErrNoCommitsRebase
 }
 
 // Apply rechecks the captured plan, so HEAD changes cannot silently rewrite a
@@ -82,7 +83,12 @@ func Validate(entries []ops.RebaseEntry) ([]ops.RebaseEntry, error) {
 
 var actions = []string{"pick", "reword", "edit", "squash", "fixup", "drop"}
 
+type actionLabels struct{ action, message, up, down string }
+
 type View struct {
+	labels        []actionLabels
+	labelMessages *i18n.Messages
+	i18n.Locale
 	Open              bool
 	Upstream          string
 	Entries, Original []ops.RebaseEntry
@@ -100,6 +106,7 @@ func (v *View) SetEntries(upstream string, entries []ops.RebaseEntry) {
 	v.Busy = false
 	v.Error = ""
 	v.Status = ""
+	v.cacheLabels()
 }
 func (v *View) Move(index, delta int) {
 	other := index + delta
@@ -110,7 +117,7 @@ func (v *View) Move(index, delta int) {
 }
 
 func (v *View) Page(c ui.C) {
-	ui.Modal(c, &v.Open, "Interactive rebase", func() { v.body(c) }, func() { v.footer(c) })
+	ui.ModalWith(c, &v.Open, v.Text().InteractiveRebase, ui.ModalSpec{NoClose: v.Text() != &i18n.En}, func() { v.body(c) }, func() { v.footer(c) })
 }
 
 // Pane embeds the rebase editor in the main editor area.
@@ -122,10 +129,13 @@ func (v *View) Pane(c ui.C) {
 }
 
 func (v *View) body(c ui.C) {
+	if v.labelMessages != v.Text() || len(v.labels) != len(v.Entries) {
+		v.cacheLabels()
+	}
 	ui.Column(c).FillWidth().Gap(8).Children(func() {
 		ui.Row(c).FillWidth().Gap(8).Children(func() {
-			ui.TextField(c, &v.Upstream, "Upstream", "HEAD~2").Grow(1).Disabled(v.Busy)
-			if controls.IconButton(c, icons.Pair(c, icons.Refresh, icons.Refresh_dark), "Load commits").Disabled(v.Busy || v.Upstream == "").Clicked() && v.OnLoad != nil {
+			ui.TextField(c, &v.Upstream, v.Text().Upstream, "HEAD~2").Grow(1).Disabled(v.Busy)
+			if controls.IconButton(c, icons.Pair(c, icons.Refresh, icons.Refresh_dark), v.Text().LoadCommits).Disabled(v.Busy || v.Upstream == "").Clicked() && v.OnLoad != nil {
 				upstream := v.Upstream
 				c.After(func() { v.OnLoad(upstream) })
 			}
@@ -136,20 +146,20 @@ func (v *View) body(c ui.C) {
 				entry := &v.Entries[i]
 				ui.Row(c.Key(entry.Commit)).FillWidth().Gap(8).Items(ui.Center).Children(func() {
 					if !v.Busy {
-						ui.Select(c, &entry.Action, actions, nil).Label(fmt.Sprintf("Action %d", i+1))
+						ui.Select(c, &entry.Action, actions, v.Text().ActionChoice).Label(v.labels[i].action)
 					} else {
-						ui.Text(c, entry.Action)
+						ui.Text(c, v.Text().ActionChoice(entry.Action))
 					}
 					ui.Text(c, entry.Commit).Width(76).Mono()
 					if entry.Action == "reword" {
-						ui.TextField(c, &entry.Subject, fmt.Sprintf("Message %d", i+1), "Commit message").Grow(1).Disabled(v.Busy)
+						ui.TextField(c, &entry.Subject, v.labels[i].message, v.Text().CommitMessage).Grow(1).Disabled(v.Busy)
 					} else {
 						ui.Text(c, entry.Subject).Grow(1)
 					}
-					if controls.IconButton(c, icons.Pair(c, icons.Up, icons.Up_dark), fmt.Sprintf("Move up %d", i+1)).Disabled(v.Busy || i == 0).Clicked() {
+					if controls.IconButton(c, icons.Pair(c, icons.Up, icons.Up_dark), v.labels[i].up).Disabled(v.Busy || i == 0).Clicked() {
 						c.After(func() { v.Move(index, -1) })
 					}
-					if controls.IconButton(c, icons.Pair(c, icons.Down, icons.Down_dark), fmt.Sprintf("Move down %d", i+1)).Disabled(v.Busy || i == len(v.Entries)-1).Clicked() {
+					if controls.IconButton(c, icons.Pair(c, icons.Down, icons.Down_dark), v.labels[i].down).Disabled(v.Busy || i == len(v.Entries)-1).Clicked() {
 						c.After(func() { v.Move(index, 1) })
 					}
 				})
@@ -162,22 +172,30 @@ func (v *View) body(c ui.C) {
 			ui.Text(c, v.Status).Muted()
 		}
 		if v.Busy {
-			ui.Text(c, "Running Git…").Muted()
+			ui.Text(c, v.Text().RunningGit).Muted()
 		}
 	})
 }
 
 func (v *View) footer(c ui.C) {
-	if ui.Button(c, "Cancel").Outline().Disabled(v.Busy).Clicked() {
+	if ui.Button(c, v.Text().Cancel).Outline().Disabled(v.Busy).Clicked() {
 		v.Open = false
 	}
 	_, err := Validate(v.Entries)
-	if ui.Button(c, "Start rebase").Outline().Disabled(v.Busy || len(v.Entries) == 0 || err != nil || v.Upstream != v.loadedUpstream).Clicked() && v.OnApply != nil {
+	if ui.Button(c, v.Text().StartRebase).Outline().Disabled(v.Busy || len(v.Entries) == 0 || err != nil || v.Upstream != v.loadedUpstream).Clicked() && v.OnApply != nil {
 		upstream := v.Upstream
 		original, edited := append([]ops.RebaseEntry(nil), v.Original...), append([]ops.RebaseEntry(nil), v.Entries...)
 		c.After(func() { v.OnApply(upstream, original, edited) })
 	}
 	if err != nil {
-		ui.Text(c, err.Error()).Color(c.Theme().Danger)
+		ui.Text(c, v.Text().InvalidTodo).Color(c.Theme().Danger)
+	}
+}
+
+func (v *View) cacheLabels() {
+	v.labelMessages = v.Text()
+	v.labels = make([]actionLabels, len(v.Entries))
+	for i := range v.labels {
+		v.labels[i] = actionLabels{v.Text().ActionNumber(i + 1), v.Text().MessageNumber(i + 1), v.Text().MoveUp(i + 1), v.Text().MoveDown(i + 1)}
 	}
 }

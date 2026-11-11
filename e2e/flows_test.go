@@ -325,3 +325,29 @@ func TestSmartCheckoutKeepsConflictingStash(t *testing.T) {
 	a.key("escape")
 	a.command(`expect absent "Close stash"`)
 }
+
+// A complete commit flow through the default-language controls, using real Git.
+func TestChineseCommitFlow(t *testing.T) {
+	f := newFixture(t)
+	f.write("base.txt", "base\n")
+	f.commit(t, "initial history entry")
+	a := startAppLanguage(t, f.repo, f.home, f.config, "zh-CN")
+	a.waitFor("initial history entry")
+	f.write("notes.txt", "中文提交测试\n")
+	a.click("刷新")
+	a.waitFor("notes.txt")
+	a.click("暂存")
+	a.waitFor("已暂存")
+	a.click("textfield:提交说明")
+	a.typeText("记录中文说明")
+	a.click("提交变更")
+	a.waitFor("没有变更")
+	if log := f.git(t, "log", "--oneline"); !strings.Contains(log, "记录中文说明") {
+		t.Fatalf("commit missing: %s", log)
+	}
+	if status := f.git(t, "status", "--porcelain"); status != "" {
+		t.Fatalf("dirty: %s", status)
+	}
+	a.waitFor("记录中文说明")
+	a.command(`expect exists "提交变更"`)
+}
