@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -53,31 +54,50 @@ func (b Branches) checkout(ctx context.Context, args []string) (model.Hash, erro
 // GitPreservingProcess runs when the user accepts a smart checkout.
 //
 // The stash message is "<operation> at <timestamp>". An empty operation
-// uses "Checkout". If the pop conflicts, the error wraps ErrConflict and
-// the stash is left for the caller; the checkout itself has completed.
+// uses "Checkout". If restoring the stash fails, ErrCheckoutRestore identifies
+// the saved changes; the checkout itself has completed. A conflicting restore
+// leaves the unmerged index available to the conflict resolver, as in Java.
 func (b Branches) CheckoutWithStash(ctx context.Context, name, operation string) (model.Hash, error) {
 	if operation == "" {
 		operation = "Checkout"
 	}
 	msg := preservingMessage(operation, time.Now())
-	if _, err := b.run(ctx, "stash", "push", "-m", msg); err != nil {
+	saved, err := b.run(ctx, "stash", "push", "-m", msg)
+	if err != nil {
 		return model.Hash{}, fmt.Errorf("stash before checkout: %w", err)
 	}
+	// Like GitStashChangesSaver, only restore a stash we actually created.
+	// Otherwise a clean checkout could pop the user's older stash.
+	if containsFold(string(saved.Stdout), "No local changes to save") {
+		return b.Checkout(ctx, name)
+	}
+	stash, err := (Stash{b.Service}).tip(ctx)
+	if err != nil {
+		return model.Hash{}, err
+	}
 	hash, checkoutErr := b.Checkout(ctx, name)
-	if checkoutErr != nil {
-		// The checkout itself failed. Pop the stash back so the work tree
-		// returns to the saved state, and report the checkout error.
-		_, _ = b.run(ctx, "stash", "pop")
-		return hash, checkoutErr
-	}
-	popRes, popErr := b.run(ctx, "stash", "pop")
+	popRes, popErr := b.run(ctx, "stash", "pop", "stash@{0}")
 	if popErr != nil {
-		// The branch switch has completed. A conflict here is the point at
-		// which Java opens the merge dialog; the new HEAD is still returned.
-		return hash, fmt.Errorf("unstash after checkout: %w", classify(popRes, popErr, command.Merge))
+		restoreErr := &ErrCheckoutRestore{Branch: name, Stash: stash, Cause: classify(popRes, popErr, command.Merge)}
+		return hash, errors.Join(checkoutErr, restoreErr)
 	}
-	return hash, nil
+	return hash, checkoutErr
 }
+
+// ErrCheckoutRestore means the saved changes could not be fully restored.
+// Git keeps the stash on failure; Stash identifies its commit even if its
+// ordinal later changes. Unwrap preserves errors.Is(err, ErrConflict).
+type ErrCheckoutRestore struct {
+	Branch string
+	Stash  model.Hash
+	Cause  error
+}
+
+func (e *ErrCheckoutRestore) Error() string {
+	return fmt.Sprintf("Local changes could not be fully restored; stash kept (%s): %v", e.Stash.Short(), e.Cause)
+}
+
+func (e *ErrCheckoutRestore) Unwrap() error { return e.Cause }
 
 // Delete removes the local branch name.
 // force selects git branch -D; otherwise git branch -d.

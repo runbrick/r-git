@@ -26,6 +26,7 @@ type View struct {
 	left, right diffview.View
 	manual      bool
 	resultField ui.Field
+	hunks       ui.ListState
 	// Edit is the workflow request current when the user last changed the
 	// result. A file load requested earlier must not replace that result.
 	Edit uint64
@@ -37,6 +38,7 @@ func (v *View) SetFile(path string, content ops.ConflictContent) {
 	v.Result = v.Merge.Result()
 	v.resultField.SetText(v.Result)
 	v.manual = false
+	v.hunks = ui.ListState{}
 	v.Error = ""
 	v.Busy = false
 	v.left.Unified = true
@@ -59,6 +61,9 @@ func (v *View) choose(index int, side textdiff.Side) {
 	v.Merge.Chunks[index].Choice = side
 	v.Result = v.Merge.Result()
 	v.resultField.SetText(v.Result)
+	if v.OnEdit != nil {
+		v.Edit = v.OnEdit()
+	}
 }
 
 func (v *View) Page(c ui.C) {
@@ -105,27 +110,27 @@ func (v *View) Page(c ui.C) {
 					})
 					ui.Column(c).Grow(1).FillHeight().Gap(4).Children(func() { ui.Text(c, v.Content.RightLabel).Bold(); v.right.Content(c, "Theirs content") })
 				})
-				ui.Scroll(c).FillWidth().MaxHeight(160).Gap(4).Children(func() {
-					for i, chunk := range v.Merge.Chunks {
-						index := i
-						ui.Row(c.KeyInt(i)).FillWidth().Gap(8).Items(ui.Center).Children(func() {
-							kind := "Change"
-							if chunk.Conflict {
-								kind = "Conflict"
-							}
-							ui.Text(c, fmt.Sprintf("%s %d · base lines %d–%d", kind, i+1, chunk.Start+1, max(chunk.Start+1, chunk.End))).Grow(1)
-							if chunk.Choice != textdiff.Unresolved {
-								ui.Text(c, "Accepted").Color(c.Theme().Success)
-							}
-							if ui.Button(c, fmt.Sprintf("Accept Yours %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
-								v.choose(index, textdiff.Left)
-							}
-							if ui.Button(c, fmt.Sprintf("Accept Theirs %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
-								v.choose(index, textdiff.Right)
-							}
-						})
-					}
-				})
+				ui.List(c, &v.hunks, len(v.Merge.Chunks), func(row ui.ListRow) {
+					i := row.Index
+					chunk := v.Merge.Chunks[i]
+					c := row.C
+					row.Element.Height(40).Gap(8).Items(ui.Center).Children(func() {
+						kind := "Change"
+						if chunk.Conflict {
+							kind = "Conflict"
+						}
+						ui.Text(c, fmt.Sprintf("%s %d · base lines %d–%d", kind, i+1, chunk.Start+1, max(chunk.Start+1, chunk.End))).Grow(1)
+						if chunk.Choice != textdiff.Unresolved {
+							ui.Text(c, "Accepted").Color(c.Theme().Success)
+						}
+						if ui.Button(c, fmt.Sprintf("Accept Yours %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
+							v.choose(i, textdiff.Left)
+						}
+						if ui.Button(c, fmt.Sprintf("Accept Theirs %d", i+1)).Disabled(v.Busy || v.manual).Clicked() {
+							v.choose(i, textdiff.Right)
+						}
+					})
+				}).Label("Conflict chunks").FillWidth().Height(120).Shrink(0)
 				ui.Row(c).FillWidth().Gap(8).Children(func() {
 					if ui.Button(c, "Accept Yours").Disabled(v.Busy).Clicked() {
 						v.Result = v.Content.Left
