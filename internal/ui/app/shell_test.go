@@ -36,6 +36,18 @@ func TestLogColumnsAlignAtWindowWidths(t *testing.T) {
 			if row.Width == 0 {
 				t.Fatal("first log row is missing")
 			}
+			var list gfx.Rect
+			for _, hit := range snapshot.Hits {
+				if hit.Container && hit.Role == gfx.RoleListBox &&
+					row.X >= hit.Bounds.X && row.X < hit.Bounds.X+hit.Bounds.Width &&
+					row.Y >= hit.Bounds.Y && row.Y < hit.Bounds.Y+hit.Bounds.Height {
+					list = hit.Bounds
+					break
+				}
+			}
+			if list.Width == 0 {
+				t.Fatal("log list bounds are missing")
+			}
 			find := func(value string, inRow bool) viva.Label {
 				t.Helper()
 				for _, label := range snapshot.Labels {
@@ -62,8 +74,8 @@ func TestLogColumnsAlignAtWindowWidths(t *testing.T) {
 				if cell.Bounds.Y < row.Y || cell.Bounds.Y >= row.Y+row.Height {
 					continue
 				}
-				if cell.Bounds.X < row.X-0.5 || cell.Bounds.X+cell.Bounds.Width > row.X+row.Width+0.5 {
-					t.Errorf("cell %q (%v) extends past log row %v", cell.Value, cell.Bounds, row)
+				if cell.Bounds.X < list.X-0.5 || cell.Bounds.X+cell.Bounds.Width > list.X+list.Width+0.5 {
+					t.Errorf("cell %q (%v) extends past log list %v", cell.Value, cell.Bounds, list)
 				}
 				ellipsis = ellipsis || strings.HasSuffix(cell.Value, "\u2026")
 			}
